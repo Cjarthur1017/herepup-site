@@ -3,6 +3,7 @@
 import * as E from "./engine.js";
 import * as R from "./readers.js";
 import * as I from "./insights.js";
+import * as T from "./timeline.js";
 
 const KEY = "herepup.v1";
 const TIERS = ["ee", "ee_sp", "ee_ch", "family"];
@@ -233,6 +234,11 @@ export async function handle(method, path, body, file) {
       res.observed = obs;
     }
     return res;
+  }
+  if (method === "POST" && p === "/api/timeline") {
+    const employers = s.employers.filter((e) => (e.plans || []).length), usable = s.claims.filter((c) => c.allowed);
+    if (!s.household.members.length || !employers.length || !usable.length) return { window: T.planWindow(usable), options: [], defaults: [] };
+    return T.buildOptions(s.household, employers, usable, { mult: Number(body.multiplier ?? 1), countHsa: body.count_hsa !== false, current: s.current_plan });
   }
   if (method === "POST" && p === "/api/spending") {
     const claims = s.claims.filter((c) => c.allowed);

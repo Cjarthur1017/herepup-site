@@ -2,9 +2,11 @@
 import { handle, upload, kindFor, mergeReviews, storageWorks } from "./local.js";
 import { INSURERS } from "./insurers.js";
 import { CARE_LABEL } from "./insights.js";
+import { quickFacts } from "./timeline.js";
+import { mountTimeline } from "./timeline-view.js";
 const STEPS = ["Household", "Plan documents", "Claims", "Your answer", "Your spending"];
 const TIERS = [["ee", "Employee only"], ["ee_sp", "Employee + spouse"], ["ee_ch", "Employee + children"], ["family", "Family"]];
-const S = { step: 0, members: [], employers: [], currentPlan: "", saved: { claims: 0 }, review: null, hints: {}, detected: [], preview: null, settings: {}, drag: "", insurer: "", spending: null, busy: "", analysis: null, mult: 1, hsa: true, msg: "", err: "" };
+const S = { step: 0, members: [], employers: [], currentPlan: "", saved: { claims: 0 }, review: null, hints: {}, detected: [], preview: null, settings: {}, drag: "", insurer: "", spending: null, busy: "", analysis: null, timeline: null, answerTab: "year", mult: 1, hsa: true, msg: "", err: "" };
 const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const usd = (n) => (n == null ? "" : (n < 0 ? "-$" : "$") + Math.abs(Math.round(n)).toLocaleString("en-US"));
@@ -55,6 +57,7 @@ function render() {
   const msg = (S.err ? `<div class="err" role="alert">${esc(S.err)}</div>` : "") + (S.msg ? `<div class="warn" role="status">${esc(S.msg)}</div>` : "");
   main.innerHTML = [stepHousehold, stepPlans, stepClaims, stepAnswer, stepSpending][S.step]() .replace("<!--MSG-->", msg);
   if (S.step === 3 && !S.analysis) runAnalysis();
+  if (S.step === 3 && S.analysis && S.answerTab === "month" && S.timeline) mountTimeline($("#timeline"), S.timeline, { mult: S.mult, countHsa: S.hsa });
   if (S.step === 4 && !S.spending) runSpending();
 }
 
@@ -211,9 +214,21 @@ function stepAnswer() {
   const who = b.detail.map((d) => `<li><b>${esc(d.employer)}: ${esc(d.plan)}</b> covers ${d.covered.map((c) => esc(nameOf(c))).join(", ")} (${esc(d.tier)})</li>`).join("");
   const flips = a.break_even.flips.length ? a.break_even.flips.map((f) => `<li>Between ${Math.round(f.between[0] * 100)}% and ${Math.round(f.between[1] * 100)}% of your past use, the best choice changes from <b>${esc(f.from)}</b> to <b>${esc(f.to)}</b>.</li>`).join("") : "<li>The same option wins at every level of use we tested (0% to 300% of your past use).</li>";
   const cal = a.calibration ? calBlock(a.calibration) : `<p class="muted">Pick the plan your claims were processed under on the plan step to see how closely we match your carrier.</p>`;
-  return `<h1>${esc(b.label)}</h1><!--MSG-->${(a.warnings || []).map((w) => `<div class="warn">${esc(w)}</div>`).join("")}
+  const tab = (id, label) => `<button role="tab" id="tab-${id}" aria-selected="${S.answerTab === id}" aria-controls="answer-panel" tabindex="${S.answerTab === id ? 0 : -1}" data-act="answer-tab" data-tab="${id}">${label}</button>`;
+  const head = `<h1>${esc(b.label)}</h1><!--MSG-->${(a.warnings || []).map((w) => `<div class="warn">${esc(w)}</div>`).join("")}
+  <div class="tl-tabs" role="tablist" aria-label="Ways to see your answer">${tab("year", "Year total")}${tab("month", 'Month by month <span class="tl-new">New</span>')}</div>`;
+  const nav = `<div class="row"><button class="btn" data-go="2">Back to claims</button><button class="btn primary" data-go="4">Review your spending</button><button class="btn danger" data-act="wipe">Delete all my data</button></div>`;
+  if (S.answerTab === "month") {
+    return `${head}<div id="answer-panel" role="tabpanel" aria-labelledby="tab-month">
+    <p class="lead">Premiums come out of every paycheck, whether you see a doctor or not. Your share of care lands in the months you get care. Here is how your year would play out under each option.</p>
+    <div id="timeline" class="tl">${S.timeline ? "" : "<p class='muted'>Month by month isn't available for these claims yet.</p>"}</div></div>${nav}`;
+  }
+  const pick = S.timeline && S.timeline.options.find((o) => o.pick);
+  const q = pick ? quickFacts(pick, S.timeline.window) : null;
+  const month = q ? `<p class="muted">Month by month, its biggest month is ${esc(q.peakMonth)} at ${usd(q.peak)}${q.setAside ? `, so set aside about ${usd(q.setAside)} by ${esc(q.setAsideBy)}` : ""}. <button class="linkbtn" data-act="answer-tab" data-tab="month">See month by month</button></p>` : "";
+  return `${head}<div id="answer-panel" role="tabpanel" aria-labelledby="tab-year">
   <div class="grid2"><div class="card"><div class="muted">Estimated cost for the year${S.mult !== 1 ? ` at ${Math.round(S.mult * 100)}% of your past use` : ""}</div><div class="bignum">${usd(b.total)}</div>
-    <p>${usd(b.premium)} premiums + ${usd(b.member_cost)} your share of care${b.hsa_offset ? ` - ${usd(b.hsa_offset)} employer HSA money` : ""}. ${second}</p><ul>${who}</ul></div>
+    <p>${usd(b.premium)} premiums + ${usd(b.member_cost)} your share of care${b.hsa_offset ? ` - ${usd(b.hsa_offset)} employer HSA money` : ""}. ${second}</p><ul>${who}</ul>${month}</div>
   <div class="card"><h2>What if...</h2><label>Your use of care next year compared with the claims you uploaded: <b id="mult-label">${Math.round(S.mult * 100)}%</b>
     <input type="range" min="0" max="300" step="5" value="${Math.round(S.mult * 100)}" id="mult"></label>
     <label style="flex-direction:row;align-items:center;gap:8px;margin-top:10px"><input type="checkbox" id="hsa" ${S.hsa ? "checked" : ""}>Count employer HSA money as an offset</label>
@@ -221,8 +236,8 @@ function stepAnswer() {
   ${a.hsa_sensitivity ? `<div class="card"><h2>Employer HSA deposit is unknown for ${a.hsa_sensitivity.plans.map(esc).join(", ")}</h2><p class="muted">The numbers above assume $0. Here is the best option at each possible family deposit (smaller levels scaled to a third):</p>
     <table><thead><tr><th>Family deposit</th><th>Best option</th><th>Total</th></tr></thead><tbody>${a.hsa_sensitivity.scenarios.map((x) => `<tr><td>${usd(x.family_deposit)}</td><td>${esc(x.best)}</td><td><b>${usd(x.total)}</b></td></tr>`).join("")}</tbody></table></div>` : ""}
   <div class="card"><h2>All the options we tested (top ${Math.min(6, a.ranked.length)} of ${a.count})</h2><div class="scroll"><table><thead><tr><th>Option</th><th>Premiums</th><th>Your care costs</th><th>HSA offset</th><th>Total</th></tr></thead><tbody>${others}</tbody></table></div></div>
-  <div class="card"><h2>How closely do we match your carrier?</h2>${cal}</div>
-  <div class="row"><button class="btn" data-go="2">Back to claims</button><button class="btn primary" data-go="4">Review your spending</button><button class="btn danger" data-act="wipe">Delete all my data</button></div>`;
+  <div class="card"><h2>How closely do we match your carrier?</h2>${cal}</div></div>
+  ${nav}`;
 }
 
 function bar(v, max) { return `<span class="bar-h" style="width:${max ? Math.max(2, Math.round((v / max) * 100)) : 0}%"></span>`; }
@@ -281,6 +296,7 @@ async function runAnalysis() {
   try {
     S.err = "";
     S.analysis = await post("/api/analyze", { multiplier: S.mult, count_hsa: S.hsa });
+    try { S.timeline = await post("/api/timeline", { multiplier: S.mult, count_hsa: S.hsa }); } catch (e) { S.timeline = null; }
   } catch (e) {
     S.err = e.message;
     S.analysis = null;
@@ -335,6 +351,10 @@ document.addEventListener("click", async (ev) => {
     else if (act === "hsa-unknown") { const p = S.employers[+t.dataset.e].plans[+t.dataset.p]; p.hsa_unknown = true; p.hsa_answered = true; render(); }
     else if (act === "hsa-reopen") { const p = S.employers[+t.dataset.e].plans[+t.dataset.p]; p.hsa_answered = false; p.hsa_unknown = false; render(); }
     else if (act === "hsa-copy") { const p = S.employers[+t.dataset.e].plans[+t.dataset.p]; p.hsa_employer.ee_sp = p.hsa_employer.family; p.hsa_employer.ee_ch = p.hsa_employer.family; render(); }
+    else if (act === "answer-tab") {
+      S.answerTab = t.dataset.tab === "month" ? "month" : "year"; render();
+      const tb = document.getElementById("tab-" + S.answerTab); if (tb) tb.focus();
+    }
     else if (act === "rerun") { await runPreview(); render(); }
     else if (act === "confirm-all") { S.review.rows.forEach((r) => { if (r.check) r.confirmed = true; }); render(); }
     else if (act === "rm-plan") { S.employers[+t.dataset.e].plans.splice(+t.dataset.p, 1); render(); }
@@ -438,6 +458,13 @@ document.addEventListener("change", async (ev) => {
     if (t.id === "mult") { S.mult = Number(t.value) / 100; S.analysis = null; render(); }
     if (t.id === "hsa") { S.hsa = t.checked; S.analysis = null; render(); }
   } catch (e) { S.err = e.message; render(); }
+});
+document.addEventListener("keydown", (ev) => {
+  const t = ev.target;
+  if (t.getAttribute && t.getAttribute("role") === "tab" && (ev.key === "ArrowRight" || ev.key === "ArrowLeft")) {
+    ev.preventDefault(); S.answerTab = S.answerTab === "year" ? "month" : "year"; render();
+    const tb = document.getElementById("tab-" + S.answerTab); if (tb) tb.focus();
+  }
 });
 document.addEventListener("input", (ev) => {
   const t = ev.target;
