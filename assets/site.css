@@ -1,4 +1,4 @@
-:root{--navy:#0F2A44;--teal:#0A7C7C;--teal-d:#075b5b;--teal-l:#E4F1F0;--ink:#33475B;--line:#D5DDE0;--bg:#F6F8F7;--card:#fff}
+:root{--navy:#0B2D50;--teal:#02929B;--teal-d:#036A71;--teal-l:#E4F1F0;--ink:#33475B;--line:#D5DDE0;--bg:#F6F8F7;--card:#fff}
 @media (prefers-color-scheme:dark){:root{--navy:#E8EEF2;--teal:#3FB6B0;--teal-d:#7FD3CE;--teal-l:#123536;--ink:#B7C4CE;--line:#2A3B47;--bg:#0E1A23;--card:#14232E}}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
@@ -6,11 +6,14 @@ body{margin:0;background:var(--bg);color:var(--navy);font:17px/1.6 system-ui,-ap
 a{color:var(--teal-d)}
 .wrap{max-width:1040px;margin:0 auto;padding:0 24px}
 header.top{display:flex;justify-content:space-between;align-items:center;padding:22px 0;gap:16px;flex-wrap:wrap}
-.logo{font-size:26px;font-weight:900;text-decoration:none;color:var(--navy);letter-spacing:-.5px}
-.logo span{color:var(--teal)}
+.logo{display:inline-flex;align-items:center;gap:8px;font-size:28px;font-weight:900;text-decoration:none;color:var(--navy);letter-spacing:-.5px}
+.logo img{height:44px;width:auto}
+.logo b{font-weight:900}.logo span{color:var(--teal)}
 nav a{margin-left:20px;text-decoration:none;color:var(--ink);font-size:15px}
 nav a:hover{color:var(--teal-d)}
-.hero{padding:56px 0 40px}
+.hero{padding:40px 0 36px;display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:32px;align-items:center}
+.hero .mascot{width:100%;max-width:400px;height:auto;justify-self:center}
+@media (max-width:760px){.hero{grid-template-columns:1fr}.hero .mascot{max-width:240px;order:-1}}
 .eyebrow{display:inline-block;font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--teal-d);background:var(--teal-l);padding:4px 12px;border-radius:999px}
 h1{font-size:clamp(34px,6vw,58px);line-height:1.05;margin:18px 0 18px;font-weight:900;letter-spacing:-1px;max-width:820px}
 .lead{font-size:clamp(18px,2.4vw,22px);color:var(--ink);max-width:720px;margin:0}
@@ -18,7 +21,7 @@ h1{font-size:clamp(34px,6vw,58px);line-height:1.05;margin:18px 0 18px;font-weigh
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px}
 .card h3{margin:6px 0 6px;font-size:19px}
 .card p{margin:0;color:var(--ink);font-size:16px}
-.num{font-weight:900;color:var(--teal);font-size:15px}
+.num{font-weight:900;color:var(--teal-d);font-size:15px}
 section{padding:28px 0}
 h2{font-size:28px;margin:0 0 12px;letter-spacing:-.3px}
 .split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px}
