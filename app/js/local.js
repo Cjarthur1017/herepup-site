@@ -1,0 +1,237 @@
+// On-device replacement for the desktop app's local server. Same request/response shapes, no network.
+// State lives in this browser's localStorage (key herepup.v1) and can be erased with "Delete all my data".
+import * as E from "./engine.js";
+import * as R from "./readers.js";
+
+const KEY = "herepup.v1";
+const TIERS = ["ee", "ee_sp", "ee_ch", "family"];
+const empty = () => ({ household: { members: [] }, employers: [], claims: [], current_plan: null, observed: null, settings: {} });
+let mem = null, storageOk = true;
+const uid = () => Math.random().toString(16).slice(2, 8);
+const clone = (x) => JSON.parse(JSON.stringify(x));
+
+function load() {
+  if (mem) return mem;
+  try { const s = localStorage.getItem(KEY); mem = s ? JSON.parse(s) : empty(); } catch (e) { storageOk = false; mem = empty(); }
+  return mem;
+}
+function save(s) {
+  mem = s;
+  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) { storageOk = false; }
+}
+export const storageWorks = () => { load(); return storageOk; };
+
+const num = (v) => { const x = Number(v); return v == null || v === "" || Number.isNaN(x) ? 0 : x; };
+function cleanPlan(p) {
+  for (const k of ["deductible_ind", "deductible_fam", "oop_ind", "oop_fam", "coinsurance", "rx_deductible_ind", "rx_deductible_fam"]) p[k] = num(p[k]);
+  if (p.coinsurance > 1) p.coinsurance = p.coinsurance / 100;
+  const cp = {}; for (const [k, v] of Object.entries(p.copays || {})) if (v != null && v !== "") cp[k] = num(v); p.copays = cp;
+  const rx = Array.isArray(p.rx_copays) ? p.rx_copays : [];
+  p.rx_copays = rx.length && rx.every((v) => v != null && v !== "") ? rx.map(num) : [];
+  p.flags = (p.flags || []).map(String);
+  for (const k of ["premium_annual", "hsa_employer"]) { const d = p[k] && typeof p[k] === "object" ? p[k] : {}; p[k] = Object.fromEntries(TIERS.map((t) => [t, num(d[t])])); }
+}
+
+function matchMember(name, members) {
+  const n = (name || "").trim().toLowerCase();
+  if (!n) return "";
+  for (const m of members) { const mn = m.name.trim().toLowerCase(); if (mn && (n === mn || n.includes(mn) || mn.includes(n))) return m.id; }
+  return "";
+}
+function newPeople(rows) {
+  const seen = [];
+  for (const r of rows) { const n = (r.member || "").trim(); if (n && !r.member_id && !seen.some((x) => x.toLowerCase() === n.toLowerCase())) seen.push(n); }
+  return seen;
+}
+const same = (a, b) => Math.abs(num(a) - num(b)) < 0.5;
+function suggestPlan(obs, employers) {
+  const hits = [];
+  for (const e of employers) (e.plans || []).forEach((p, i) => {
+    if (same(p.deductible_ind, obs.ded_ind) && same(p.deductible_fam, obs.ded_fam) && same(p.oop_ind, obs.oop_ind) && same(p.oop_fam, obs.oop_fam)) hits.push(`${e.id}:${i}`);
+  });
+  return hits.length === 1 ? hits[0] : "";
+}
+
+// Stop reading a scanned guide once every plan detail has been found (deductibles, premiums by level, Rx copays).
+const guideComplete = (pages) => {
+  const d = R.detectPlans(pages);
+  return d.plans.length > 0 && d.notes.some((n) => n.startsWith("Premiums in the guide")) && d.plans.every((p) => p.rx_copays.length);
+};
+async function readDoc(file, onProgress, stopWhen = null) {
+  const name = (file.name || "").toLowerCase();
+  if (name.endsWith(".pdf") || file.type === "application/pdf") return { pdf: true, ...(await R.pdfPages(file, onProgress, stopWhen)) };
+  return { pdf: false, pages: [await file.text()], scanned_pages: 0, ocr_pages: 0, unreadable_pages: 0 };
+}
+
+export function kindFor(file, step) {
+  const n = (file.name || "").toLowerCase();
+  if (n.endsWith(".csv") || n.endsWith(".xlsx")) return "claims_csv";
+  if (n.endsWith(".json")) return "fhir";
+  if (n.endsWith(".xls")) return "xls";
+  if (n.endsWith(".pdf") || n.endsWith(".txt")) return step === 1 ? "plan" : "eob";
+  return "unknown";
+}
+
+export async function upload(file, kind, order = null, onProgress = () => {}) {
+  const s = load();
+  if (kind === "xls") throw new Error(`${file.name} is an older Excel format. Open it and save as .xlsx or .csv, then drop it again.`);
+  if (kind === "unknown") throw new Error(`${file.name} isn't a file type HerePup reads. Use PDF, CSV, Excel (.xlsx) or FHIR JSON.`);
+  if (kind === "plan") {
+    const doc = await readDoc(file, onProgress, guideComplete);
+    const det = R.detectPlans(doc.pages, file.name);
+    if (doc.skipped_pages) det.notes.push(`This guide is scanned. HerePup stopped reading after it found every plan detail; the last ${doc.skipped_pages} page(s) were not needed.`);
+    let message = "";
+    if (!det.plans.length && R.parseCignaEob(doc.pages).rows.length) message = `${file.name} looks like an explanation of benefits, not a benefit guide. Add it on the Claims step.`;
+    else if (doc.unreadable_pages && !det.plans.length) message = `${doc.unreadable_pages} scanned page(s) could not be read${doc.ocr_error ? ` (${doc.ocr_error})` : ""}. Type the plan numbers by hand instead.`;
+    return { kind, detected: det, hints: R.planHints(doc.pages.join("\n")), message, scanned_pages: doc.scanned_pages, ocr_pages: doc.ocr_pages, unreadable_pages: doc.unreadable_pages };
+  }
+  let res;
+  if (kind === "eob") {
+    if (!(file.name || "").toLowerCase().endsWith(".pdf")) throw new Error(`${file.name}: explanations of benefits must be PDFs.`);
+    const doc = await readDoc(file, onProgress);
+    res = R.parseCignaEob(doc.pages);
+    if (!res.rows.length) {
+      if (R.detectPlans(doc.pages, file.name).plans.length) throw new Error(`${file.name} looks like a benefit guide, not a claim. Add it on the Plan documents step.`);
+      res = R.parseEobText(doc.pages.join("\n"), order);
+      res.generic_reader = true;
+      res.unreadable_pages = doc.unreadable_pages;
+    }
+    if (res.observed) { s.observed = res.observed; save(s); res.suggest_current_plan = suggestPlan(res.observed, s.employers); }
+  } else if (kind === "claims_csv") {
+    const recs = (file.name || "").toLowerCase().endsWith(".xlsx") ? await R.xlsxRecords(await file.arrayBuffer()) : R.csvRecords(await file.text());
+    res = R.parseRecords(recs);
+  } else if (kind === "fhir") {
+    res = R.parseFhirText(await file.text());
+  } else throw new Error("Unknown file type.");
+  R.classifyRows(res.rows);
+  for (const r of res.rows) r.member_id = matchMember(r.member, s.household.members);
+  res.kind = kind;
+  res.new_people = newPeople(res.rows);
+  return res;
+}
+
+export function mergeReviews(list) {
+  const out = { kind: list.length === 1 ? list[0].kind : "mixed", rows: [], notes: [], errors: [], unparsed_dated_lines: [], unreadable_pages: 0 };
+  const ids = new Set();
+  for (const r of list) {
+    for (const row of r.rows || []) if (!ids.has(row.id)) { ids.add(row.id); out.rows.push(row); }
+    for (const n of r.notes || []) if (!out.notes.includes(n)) out.notes.push(n);
+    out.errors.push(...(r.errors || []));
+    out.unparsed_dated_lines.push(...(r.unparsed_dated_lines || []));
+    out.unreadable_pages += r.unreadable_pages || 0;
+    if (r.observed) out.observed = r.observed;
+    if (r.suggest_current_plan) out.suggest_current_plan = r.suggest_current_plan;
+    if (r.generic_reader) out.generic_reader = true;
+    if (r.coverage) out.coverage = (out.coverage || []).concat(r.coverage);
+    out.skipped = (out.skipped || 0) + (r.kind === "fhir" ? r.skipped || 0 : 0);
+  }
+  out.new_people = newPeople(out.rows);
+  return out;
+}
+
+function calibrateAll(s, employers, usable) {
+  const cp = s.current_plan || {};
+  const def = cp.employer ? `${cp.employer}:${cp.plan_index || 0}` : "";
+  const groups = {};
+  for (const c of usable) (groups[c.processed_under || def] ||= []).push(c);
+  const members = s.household.members.map((m) => m.id);
+  let merged = null;
+  for (const [key, cl] of Object.entries(groups)) {
+    if (!key.includes(":")) continue;
+    const [eid, pi] = key.split(":");
+    const plan = (employers.find((e) => e.id === eid) || { plans: [] }).plans[+pi];
+    if (!plan) continue;
+    const r = E.calibrate(plan, cl, members);
+    if (!merged) { merged = r; continue; }
+    merged.rows.push(...r.rows);
+    merged.claims_checked += r.claims_checked; merged.flagged += r.flagged;
+    for (const k of ["modeled_total", "actual_total", "total_gap"]) merged[k] = Math.round((merged[k] + r[k]) * 100) / 100;
+  }
+  if (merged && merged.claims_checked) merged.mean_abs_error = Math.round(merged.rows.reduce((a, x) => a + Math.abs(x.diff), 0) / merged.claims_checked * 100) / 100;
+  return merged;
+}
+
+// ------------------------------------------------------------------ the "API"
+export async function handle(method, path, body, file) {
+  const s = load();
+  const url = new URL(path, "http://local");
+  const p = url.pathname;
+  if (method === "GET" && p === "/api/state") return clone(s);
+  if (method === "PUT" && p === "/api/household") {
+    for (const m of body.members) { m.id ||= uid(); if (m.role !== "adult" && m.role !== "child") m.role = "adult"; }
+    s.household = { members: body.members }; save(s); return clone(s.household);
+  }
+  if (method === "PUT" && p === "/api/employers") {
+    for (const e of body.employers) { e.id ||= uid(); for (const pl of e.plans || []) cleanPlan(pl); }
+    s.employers = body.employers;
+    if ("current_plan" in body) s.current_plan = body.current_plan;
+    save(s); return { employers: clone(s.employers), current_plan: s.current_plan };
+  }
+  if (method === "PUT" && p === "/api/settings") { s.settings = body || {}; save(s); return s.settings; }
+  if (method === "POST" && p === "/api/upload") return upload(file, url.searchParams.get("kind"), url.searchParams.get("order") ? url.searchParams.get("order").split(",").map((x) => x.trim()) : null, body && body.onProgress);
+  if (method === "POST" && p === "/api/claims/commit") {
+    const clean = [];
+    for (const r of body.rows) {
+      if (!r.date || !r.member_id || r.skip) continue;
+      clean.push({ id: r.id || uid(), date: r.date, member: r.member_id, provider: r.provider || "", category: r.category || "medical",
+        billed: r.billed, allowed: r.allowed, plan_paid: r.plan_paid, member_resp: r.member_resp, rx_tier: r.rx_tier ?? null,
+        copay: r.copay ?? null, deductible: r.deductible ?? null, coinsurance: r.coinsurance ?? null, service: r.service || "",
+        type_source: r.type_source || "", place: r.place || "", source: r.source || "", processed_under: r.processed_under || "" });
+    }
+    if (body.replace) s.claims = clean;
+    else { const have = new Set(s.claims.map((c) => c.id)); s.claims.push(...clean.filter((c) => !have.has(c.id))); }
+    save(s); return { saved: clean.length, total: s.claims.length };
+  }
+  if (method === "POST" && p === "/api/review/preview") {
+    const claims = body.rows.filter((r) => r.date && r.member_id && !r.skip && r.allowed).map((r) => ({ id: r.id, date: r.date, member: r.member_id,
+      provider: r.provider || "", category: r.category || "medical", allowed: r.allowed, rx_tier: r.rx_tier }));
+    const ids = s.household.members.map((m) => m.id);
+    const plans = [];
+    for (const e of s.employers) (e.plans || []).forEach((pl, i) => {
+      const sim = E.simulate(pl, claims, ids, 1);
+      plans.push({ key: `${e.id}:${i}`, label: `${e.name}: ${pl.name || "plan"}`, total: Math.round(sim.member_cost * 100) / 100,
+        lines: Object.fromEntries(sim.lines.map((l) => [l.id, { cost: l.member_cost, basis: l.basis }])) });
+    });
+    return { plans };
+  }
+  if (method === "POST" && p === "/api/analyze") {
+    const mult = Number(body.multiplier ?? 1), countHsa = body.count_hsa !== false;
+    const warnings = [];
+    const employers = s.employers.filter((e) => (e.plans || []).length);
+    if (!s.household.members.length) throw new Error("Add your household members first.");
+    if (!employers.length) throw new Error("Add at least one employer plan first.");
+    const usable = s.claims.filter((c) => c.allowed);
+    if (s.claims.length - usable.length) warnings.push(`${s.claims.length - usable.length} claim(s) have no allowed amount and were left out.`);
+    if (!usable.length) throw new Error("Add claims with allowed amounts first.");
+    const ids = new Set(s.household.members.map((m) => m.id));
+    for (const e of employers) if (!ids.has(e.subscriber)) throw new Error(`Pick the household member who works at ${e.name}.`);
+    for (const e of employers) for (const pl of e.plans) if (pl.hsa_eligible && pl.hsa_answered === false && !pl.hsa_unknown)
+      throw new Error(`Tell us the employer HSA deposit for ${e.name}: ${pl.name} (step 2), or mark it unknown.`);
+    const res = E.analyze(s.household, employers, usable, mult, countHsa);
+    const unknown = employers.flatMap((e) => e.plans.filter((pl) => pl.hsa_unknown).map((pl) => `${e.name}: ${pl.name}`));
+    if (unknown.length) {
+      const scenarios = [0, 1500, 3000].map((dep) => {
+        const emps2 = clone(employers);
+        for (const e of emps2) for (const pl of e.plans) if (pl.hsa_unknown) pl.hsa_employer = { ee: dep / 3, ee_sp: dep / 3, ee_ch: dep / 3, family: dep };
+        const r2 = E.analyze(s.household, emps2, usable, mult, countHsa);
+        return { family_deposit: dep, best: r2.best.label, total: r2.best.total };
+      });
+      res.hsa_sensitivity = { plans: unknown, scenarios };
+    }
+    res.warnings = warnings;
+    res.break_even = E.breakEven(s.household, employers, usable, countHsa);
+    const cal = calibrateAll(s, employers, usable);
+    if (cal) res.calibration = cal;
+    res.claims_used = usable.length;
+    const obs = s.observed;
+    if (obs && obs.ded_fam_met) {
+      const cutoff = obs.as_of || "9999";
+      const seen = s.claims.filter((c) => c.date <= cutoff && c.category !== "rx").reduce((a, c) => a + num(c.member_resp), 0);
+      if (obs.ded_fam_met - seen > 200) warnings.push(`Your carrier reported $${Math.round(obs.ded_fam_met).toLocaleString()} met toward the family deductible by ${cutoff}, but the medical claims you saved account for about $${Math.round(seen).toLocaleString()} of your cost share up to then. Add the rest of your medical claims; until then the answer understates your real medical use.`);
+      res.observed = obs;
+    }
+    return res;
+  }
+  if (method === "DELETE" && p === "/api/data") { try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ } mem = empty(); return { deleted: true }; }
+  throw new Error("Not available in the web version.");
+}
