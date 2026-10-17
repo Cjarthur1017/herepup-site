@@ -2,6 +2,7 @@
 // State lives in this browser's localStorage (key herepup.v1) and can be erased with "Delete all my data".
 import * as E from "./engine.js";
 import * as R from "./readers.js";
+import * as I from "./insights.js";
 
 const KEY = "herepup.v1";
 const TIERS = ["ee", "ee_sp", "ee_ch", "family"];
@@ -176,7 +177,8 @@ export async function handle(method, path, body, file) {
       clean.push({ id: r.id || uid(), date: r.date, member: r.member_id, provider: r.provider || "", category: r.category || "medical",
         billed: r.billed, allowed: r.allowed, plan_paid: r.plan_paid, member_resp: r.member_resp, rx_tier: r.rx_tier ?? null,
         copay: r.copay ?? null, deductible: r.deductible ?? null, coinsurance: r.coinsurance ?? null, service: r.service || "",
-        type_source: r.type_source || "", place: r.place || "", source: r.source || "", processed_under: r.processed_under || "" });
+        type_source: r.type_source || "", place: r.place || "", source: r.source || "", processed_under: r.processed_under || "",
+        proc: r.proc || "", rx_drug: r.rx_drug || "", pharmacy: r.pharmacy || "", rx_qty: r.rx_qty ?? null, payee: r.payee || "" });
     }
     if (body.replace) s.claims = clean;
     else { const have = new Set(s.claims.map((c) => c.id)); s.claims.push(...clean.filter((c) => !have.has(c.id))); }
@@ -231,6 +233,15 @@ export async function handle(method, path, body, file) {
       res.observed = obs;
     }
     return res;
+  }
+  if (method === "POST" && p === "/api/spending") {
+    const claims = s.claims.filter((c) => c.allowed);
+    const members = s.household.members;
+    const cp = s.current_plan || {};
+    const emp = cp.employer ? s.employers.find((e) => e.id === cp.employer) : null;
+    const plan = emp ? (emp.plans || [])[cp.plan_index || 0] : null;
+    return { summary: I.summarize(claims, members), comparisons: I.compareProviders(claims, members, plan), er: I.erVsUrgent(claims, members, plan),
+      plan_label: plan ? `${emp.name}: ${plan.name}` : "" };
   }
   if (method === "DELETE" && p === "/api/data") { try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ } mem = empty(); return { deleted: true }; }
   throw new Error("Not available in the web version.");

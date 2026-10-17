@@ -84,10 +84,14 @@ export function parseRecords(records) {
     if (!d) { skipped++; continue; }
     let prov = String(get(r, "provider") || "").trim();
     let cat = String(get(r, "category") || "").trim().toLowerCase();
+    let rxDrug = null, pharmacy = null, rxQty = null;
     if (isRx) {
       cat = "rx";
+      const q = prov.match(/Quantity:\s*([\d.]+)/i); rxQty = q ? Number(q[1]) : null;
       prov = prov.replace(/\s+Quantity:.*$/, "");
+      rxDrug = prov;
       const ph = String(get(r, "pharmacy") || "").trim();
+      pharmacy = ph || null;
       prov = ph ? `${prov} (${ph})` : prov;
     }
     const billed = money(get(r, "billed")); let allowed = money(get(r, "allowed"));
@@ -96,7 +100,7 @@ export function parseRecords(records) {
     const rxn = String(get(r, "rx_number") || "").trim();
     const row = { id: isRx && rxn ? "rx-" + rxn : newId(), date: d, member: String(get(r, "member") || "").trim(), provider: prov,
       category: CATEGORIES.includes(cat) ? cat : classifyText(prov + " " + cat), billed, allowed, plan_paid: paid, member_resp: owe, needs_review: allowed == null };
-    if (row.category === "rx") row.rx_tier = inferRxTier(allowed);
+    if (row.category === "rx") Object.assign(row, { rx_tier: inferRxTier(allowed), rx_drug: rxDrug, pharmacy, rx_qty: rxQty });
     rows.push(row);
   }
   const notes = [];
@@ -571,7 +575,9 @@ export function mapFhir(resources) {
         billed: a.submitted ?? null, allowed, plan_paid: paid, member_resp: owe, copay: a.copay ?? null, deductible: a.deductible ?? null, coinsurance: a.coinsurance ?? null,
         needs_review: allowed == null, place: pos.includes("11") ? "office" : (pos[0] && ["21", "22", "23"].includes(pos[0]) ? "facility" : ""), claim: eob.id || "" };
       if (typed) Object.assign(row, { type_source: typed[1], type_confidence: "high", type_locked: true });
-      if (row.category === "rx") { row.rx_tier = brand.join("").includes("generic") || !brand.length ? 1 : 2; row.type_source = "Pharmacy claim" + (brand.length ? ` (${brand[0]})` : ""); }
+      if (cpt[0] && row.category !== "rx") row.proc = cpt[0];
+      if (row.category === "rx") Object.assign(row, { rx_tier: brand.join("").includes("generic") || !brand.length ? 1 : 2, type_source: "Pharmacy claim" + (brand.length ? ` (${brand[0]})` : ""),
+        rx_drug: desc, pharmacy: provider, rx_qty: it && it.quantity && it.quantity.value != null ? Number(it.quantity.value) : null });
       rows.push(row);
     });
     for (const bb of eob.benefitBalance || []) for (const fin of bb.financial || []) {

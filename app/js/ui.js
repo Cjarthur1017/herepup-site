@@ -1,8 +1,10 @@
 "use strict";
 import { handle, upload, kindFor, mergeReviews, storageWorks } from "./local.js";
-const STEPS = ["Household", "Plan documents", "Claims", "Your answer"];
+import { INSURERS } from "./insurers.js";
+import { CARE_LABEL } from "./insights.js";
+const STEPS = ["Household", "Plan documents", "Claims", "Your answer", "Your spending"];
 const TIERS = [["ee", "Employee only"], ["ee_sp", "Employee + spouse"], ["ee_ch", "Employee + children"], ["family", "Family"]];
-const S = { step: 0, members: [], employers: [], currentPlan: "", saved: { claims: 0 }, review: null, hints: {}, detected: [], preview: null, settings: {}, drag: "", busy: "", analysis: null, mult: 1, hsa: true, msg: "", err: "" };
+const S = { step: 0, members: [], employers: [], currentPlan: "", saved: { claims: 0 }, review: null, hints: {}, detected: [], preview: null, settings: {}, drag: "", insurer: "", spending: null, busy: "", analysis: null, mult: 1, hsa: true, msg: "", err: "" };
 const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const usd = (n) => (n == null ? "" : (n < 0 ? "-$" : "$") + Math.abs(Math.round(n)).toLocaleString("en-US"));
@@ -51,8 +53,9 @@ function render() {
   $("#progress").innerHTML = STEPS.map((n, i) => `<button class="${i < S.step ? "done" : i === S.step ? "now" : ""}" data-go="${i}"><div class="bar"></div>${i + 1}. ${n}</button>`).join("");
   const main = $("#main");
   const msg = (S.err ? `<div class="err" role="alert">${esc(S.err)}</div>` : "") + (S.msg ? `<div class="warn" role="status">${esc(S.msg)}</div>` : "");
-  main.innerHTML = [stepHousehold, stepPlans, stepClaims, stepAnswer][S.step]() .replace("<!--MSG-->", msg);
+  main.innerHTML = [stepHousehold, stepPlans, stepClaims, stepAnswer, stepSpending][S.step]() .replace("<!--MSG-->", msg);
   if (S.step === 3 && !S.analysis) runAnalysis();
+  if (S.step === 4 && !S.spending) runSpending();
 }
 
 function stepHousehold() {
@@ -171,10 +174,21 @@ function reviewTable() {
 function stepClaims() {
   return `<h1>Add your claims</h1><p class="lead">Drop in your explanations of benefits (EOBs) and claim summaries. We read them on this device, and you check every row.</p><!--MSG-->
   <div class="grid2">${dropZone("claims", "Drop your claims here", "EOB PDFs, claim or pharmacy summaries (CSV or Excel), or a FHIR export from your insurer. Drop several at once; they're combined into one review.")}
-  <div class="card"><h2>Where to find your claims</h2><p class="muted">Sign in to your insurer's member website or app, open <b>Claims</b>, and look for <b>Download</b> or <b>Export</b>. A spreadsheet of all claims works best. Individual EOB PDFs work too.</p>
-    <p class="muted">${S.saved.claims} claim(s) already saved in this browser.</p></div></div>
+  ${insurerCard()}</div>
   ${reviewTable()}
   <div class="row"><button class="btn" data-go="1">Back</button><button class="btn primary" data-act="to-answer">See my answer</button></div>`;
+}
+
+function insurerCard() {
+  const ins = INSURERS.find((x) => x.id === S.insurer);
+  const opts = `<option value="">Choose your insurer...</option>` + INSURERS.map((x) => `<option value="${x.id}" ${x.id === S.insurer ? "selected" : ""}>${esc(x.name)}</option>`).join("");
+  const body = !ins ? `<p class="muted">Pick your insurer to see where to download your claims and whether a direct connection is possible.</p>`
+    : `<ol class="muted steps-list"><li>Sign in to ${ins.member ? `<a href="${esc(ins.member)}" target="_blank" rel="noopener">your ${esc(ins.name)} member site</a>` : "your insurer's member website"} or app.</li>
+        <li>Open <b>Claims</b>. Look for <b>Download</b> or <b>Export</b> to get a spreadsheet of all claims, or open each claim's explanation of benefits (EOB) as a PDF.</li>
+        <li>Drop the files here.</li></ol>
+      ${ins.id !== "other" ? `<p class="muted"><b>Direct connection:</b> ${esc(ins.name)} publishes a Patient Access API. ${esc(ins.covers)} HerePup status: ${esc(ins.herepup)}. <a href="/insurers/">About insurer connections</a></p>` : ""}`;
+  return `<div class="card"><h2>Get your claims from your insurer</h2><label>Your insurer<select data-act="insurer">${opts}</select></label>${body}
+    <p class="muted">${S.saved.claims} claim(s) already saved in this browser.</p></div>`;
 }
 
 function dropZone(kind, title, help) {
@@ -208,7 +222,52 @@ function stepAnswer() {
     <table><thead><tr><th>Family deposit</th><th>Best option</th><th>Total</th></tr></thead><tbody>${a.hsa_sensitivity.scenarios.map((x) => `<tr><td>${usd(x.family_deposit)}</td><td>${esc(x.best)}</td><td><b>${usd(x.total)}</b></td></tr>`).join("")}</tbody></table></div>` : ""}
   <div class="card"><h2>All the options we tested (top ${Math.min(6, a.ranked.length)} of ${a.count})</h2><div class="scroll"><table><thead><tr><th>Option</th><th>Premiums</th><th>Your care costs</th><th>HSA offset</th><th>Total</th></tr></thead><tbody>${others}</tbody></table></div></div>
   <div class="card"><h2>How closely do we match your carrier?</h2>${cal}</div>
-  <div class="row"><button class="btn" data-go="2">Back to claims</button><button class="btn danger" data-act="wipe">Delete all my data</button></div>`;
+  <div class="row"><button class="btn" data-go="2">Back to claims</button><button class="btn primary" data-go="4">Review your spending</button><button class="btn danger" data-act="wipe">Delete all my data</button></div>`;
+}
+
+function bar(v, max) { return `<span class="bar-h" style="width:${max ? Math.max(2, Math.round((v / max) * 100)) : 0}%"></span>`; }
+
+function stepSpending() {
+  const sp = S.spending;
+  if (!sp) return `<h1>Your spending</h1><!--MSG--><p class="lead">Adding up your claims...</p>`;
+  const s = sp.summary;
+  const nameOf = (id) => (S.members.find((m) => m.id === id) || {}).name || id;
+  if (!s.claims) return `<h1>Your spending</h1><!--MSG--><p class="lead">Save some claims first, then come back here.</p><div class="row"><button class="btn" data-go="2">Add claims</button></div>`;
+  const maxT = Math.max(...s.by_type.map((t) => t.allowed), 1);
+  const types = s.by_type.map((t) => `<tr><td>${esc(t.label)}</td><td class="n">${t.count}</td><td class="barcell">${bar(t.allowed, maxT)}<span>${usd(t.allowed)}</span></td><td class="n">${usd(t.paid)}</td></tr>`).join("");
+  const people = s.by_person.map((p) => `<tr><td>${esc(p.member)}</td><td class="n">${p.count}</td><td class="n">${usd(p.allowed)}</td><td class="n">${usd(p.paid)}</td></tr>`).join("");
+  const provs = s.by_provider.map((p) => `<tr><td>${esc(p.provider)}<div class="muted small">${esc(p.types)}</div></td><td class="n">${p.count}</td><td class="n">${usd(p.allowed)}</td><td class="n">${usd(p.paid)}</td></tr>`).join("");
+  const money2 = (n) => (n == null ? "" : "$" + Number(n).toFixed(2));
+  const cmp = sp.comparisons.map((c) => {
+    const max = Math.max(...c.providers.map((p) => p.avg), 1);
+    const fmt = c.per === "per unit" ? money2 : usd;
+    return `<div class="card cmp"><div class="row" style="justify-content:space-between;align-items:baseline"><h3>${esc(c.label)}</h3>
+      <span class="save">${c.you_save != null ? `You could have saved about ${usd(c.you_save)}` : `About ${usd(c.care_saving)} less in total care`}</span></div>
+      <p class="muted small">Compared ${esc(c.basis)}, average allowed ${esc(c.per)}. ${c.visits} ${c.rx ? "fill" : "visit"}${c.visits === 1 ? "" : "s"} in your claims.</p>
+      <table class="cmp-t"><tbody>${c.providers.map((p, i) => `<tr class="${i === 0 ? "best" : ""}"><td>${esc(p.provider)}${i === 0 ? ' <span class="chip">Lowest cost you used</span>' : ""}</td>
+        <td class="n">${p.visits}x</td><td class="barcell">${bar(p.avg, max)}<span>${fmt(p.avg)}</span></td></tr>`).join("")}</tbody></table>
+      <p class="small">Using ${esc(c.cheapest)} for the same care would have lowered total care by about <b>${usd(c.care_saving)}</b>${c.you_save != null ? ` and your own costs by about <b>${usd(c.you_save)}</b> under ${esc(sp.plan_label)}` : ""}.${c.you_save === 0 ? " Your plan's flat copays meant the price difference didn't reach you this time." : ""}</p></div>`;
+  }).join("");
+  const er = sp.er ? `<div class="card cmp"><h3>Emergency room or urgent care?</h3>
+    <p>Your ${sp.er.er_visits} ER visit${sp.er.er_visits === 1 ? "" : "s"} averaged <b>${usd(sp.er.er_avg)}</b> in total care. Your ${sp.er.urgent_visits} urgent care visit${sp.er.urgent_visits === 1 ? "" : "s"} averaged <b>${usd(sp.er.urgent_avg)}</b>.
+    ${sp.er.you_save_all != null ? `If ${sp.er.er_visits === 1 ? "that visit" : "those visits"} could have been handled at urgent care, you would have paid about <b>${usd(sp.er.you_save_all)}</b> less under ${esc(sp.plan_label)}.` : ""}</p>
+    <p class="muted small">Only you and your doctor know whether the ER was needed. In an emergency, always go to the ER.</p></div>` : "";
+  return `<h1>Your spending</h1><!--MSG--><p class="lead">What your household's care cost from ${esc(s.from)} to ${esc(s.to)}, and where the same kind of care cost less.</p>
+  <div class="tiles"><div class="tile"><div class="muted">Total care (allowed)</div><b>${usd(s.allowed)}</b></div><div class="tile"><div class="muted">Your plan paid</div><b>${usd(s.plan_paid)}</b></div>
+    <div class="tile"><div class="muted">You paid</div><b>${usd(s.paid)}</b></div><div class="tile"><div class="muted">Claims</div><b>${s.claims}</b></div></div>
+  <h2 style="margin-top:28px">Could the same care have cost less?</h2>
+  ${cmp || er ? "" : `<div class="card"><p>We didn't find the same kind of care at two different providers in your claims, so there's nothing to compare yet. Comparisons appear when, for example, two urgent care centers, two labs or two pharmacies show up for the same service. Adding a full year of claims helps.</p></div>`}
+  ${cmp}${er}
+  ${cmp || er ? `<p class="muted small">Visits of the same type can differ in what was done, so treat these as a guide. Comparisons only use providers you've already been to; in-network status isn't checked.${sp.plan_label ? "" : " Pick the plan your claims were processed under on step 2 to see what you personally would have saved."}</p>` : ""}
+  <div class="grid2"><div class="card"><h2>By type of care</h2><table class="sp"><thead><tr><th>Care</th><th class="n">Claims</th><th>Total care</th><th class="n">You paid</th></tr></thead><tbody>${types}</tbody></table></div>
+  <div class="card"><h2>By person</h2><table class="sp"><thead><tr><th>Person</th><th class="n">Claims</th><th class="n">Total care</th><th class="n">You paid</th></tr></thead><tbody>${people}</tbody></table></div></div>
+  <div class="card"><h2>Where your care happened</h2><div class="scroll"><table class="sp"><thead><tr><th>Provider</th><th class="n">Claims</th><th class="n">Total care</th><th class="n">You paid</th></tr></thead><tbody>${provs}</tbody></table></div></div>
+  <div class="row"><button class="btn" data-go="3">Back to your answer</button><button class="btn" data-go="2">Add more claims</button></div>`;
+}
+
+async function runSpending() {
+  try { S.spending = await post("/api/spending", {}); } catch (e) { S.err = e.message; S.spending = { summary: { claims: 0 }, comparisons: [], er: null }; }
+  render();
 }
 
 function calBlock(c) {
@@ -240,7 +299,7 @@ document.addEventListener("click", async (ev) => {
   if (!t) return;
   S.err = ""; S.msg = "";
   try {
-    if (t.dataset.go !== undefined) { S.step = Number(t.dataset.go); S.analysis = null; return render(); }
+    if (t.dataset.go !== undefined) { S.step = Number(t.dataset.go); S.analysis = null; S.spending = null; return render(); }
     const act = t.dataset.act;
     if (act === "add-member") { S.members.push({ id: uid(), name: "", role: "adult" }); render(); }
     else if (act === "rm-member") { S.members.splice(Number(t.dataset.i), 1); render(); }
@@ -300,7 +359,7 @@ document.addEventListener("click", async (ev) => {
     else if (act === "commit") {
       if (S.review.rows.some((x) => x.check && !x.confirmed && !x.skip)) throw new Error("Confirm or change the highlighted care types first (tick \"Confirm this type\").");
       const r = await post("/api/claims/commit", { rows: S.review.rows });
-      S.saved.claims = r.total; S.review = null; S.msg = `Saved ${r.saved} claim(s).`; render();
+      S.saved.claims = r.total; S.review = null; S.spending = null; S.msg = `Saved ${r.saved} claim(s).`; render();
     }
     else if (act === "discard") { S.review = null; render(); }
     else if (act === "to-answer") {
@@ -350,6 +409,7 @@ async function handleFiles(files, zone, order = null) {
 document.addEventListener("change", async (ev) => {
   const t = ev.target;
   try {
+    if (t.dataset.act === "insurer") { S.insurer = t.value; render(); return; }
     if (t.dataset.det !== undefined) { const d = S.detected[+t.dataset.det]; if (d) d[t.dataset.detField] = t.value; return; }
     if (t.dataset.act === "drop-pick" && t.files.length) { const fl = [...t.files]; t.value = ""; await handleFiles(fl, t.dataset.kind); return; }
     if (t.dataset.act === "guide-file" && t.files[0]) {

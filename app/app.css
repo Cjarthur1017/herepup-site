@@ -65,3 +65,12 @@ table.landing td,table.landing th{white-space:nowrap}
 .drop [role=status]{text-align:center;margin:0 16px 4px;font-weight:700;color:var(--teal)}
 .local-line{text-align:center;margin:0 0 14px;font-size:13px}
 .grid2 > .drop{margin-top:16px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin:12px 0}
+.tile{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px}.tile b{display:block;font-size:30px;font-weight:900;margin-top:4px}
+table.sp td.n,table.sp th.n,.cmp-t td.n{text-align:right;white-space:nowrap}
+.barcell{min-width:180px;white-space:nowrap}.barcell span:last-child{margin-left:8px;font-weight:700}
+.bar-h{display:inline-block;height:12px;border-radius:6px;background:var(--teal);vertical-align:middle;max-width:65%}
+.cmp h3{margin:0;font-size:20px}.cmp .save{font-weight:900;color:#075b5b;background:var(--teal-l);padding:4px 12px;border-radius:999px}
+.cmp-t{margin:10px 0}.cmp-t tr.best td{background:#F2FAF9}.cmp-t td{padding:8px}
+.small{font-size:14px}
+.steps-list{padding-left:20px;margin:10px 0}.steps-list li{margin:4px 0}
