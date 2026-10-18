@@ -203,7 +203,7 @@ home = f'''
   </div>
   <a class="video-teaser" href="/how-it-works/#watch">
     <img src="/assets/herepup-walkthrough-poster.jpg" alt="" width="1920" height="1080" loading="lazy">
-    <span><b>Watch the 2-minute walkthrough</b><br>See a sample household go from benefit guides to an answer, step by step.</span>
+    <span><b>Watch the 3-minute walkthrough</b><br>See a sample household go from benefit guides to an answer, month-by-month costs and savings, step by step.</span>
   </a>
 </section>
 
@@ -255,7 +255,7 @@ how = '''
 <p>You can use it whenever your coverage choice matters: at open enrollment, when you start a new job or compare offers, after a life event such as marriage or a new baby, or when you're planning and budgeting for the year ahead.</p>
 
 <section id="watch" class="tight">
-  <h2>Watch the walkthrough <span class="muted">(2 minutes)</span></h2>
+  <h2>Watch the walkthrough <span class="muted">(3 minutes)</span></h2>
   <video controls playsinline preload="none" poster="/assets/herepup-walkthrough-poster.jpg" width="1920" height="1080">
     <source src="/assets/herepup-walkthrough.mp4" type="video/mp4">
     <track kind="captions" src="/assets/herepup-walkthrough.en.vtt" srclang="en" label="English">
@@ -301,9 +301,9 @@ how = '''
 <p style="margin:8px 0 0"><a class="cta" href="/app/">Try HerePup in your browser</a></p>
 </main>'''
 VIDEO = {"@type": "VideoObject", "@id": BASE + "/how-it-works/#video", "name": "How HerePup estimates your health plan costs",
-         "description": "A two-minute walkthrough of HerePup with a sample household: adding benefit guides and claims history, then seeing what each plan is likely to cost.",
-         "thumbnailUrl": [BASE + "/assets/herepup-walkthrough-poster.jpg"], "uploadDate": "2026-10-16T22:14:36-04:00",
-         "duration": "PT1M58S", "contentUrl": BASE + "/assets/herepup-walkthrough.mp4", "publisher": {"@id": BASE + "/#org"}}
+         "description": "A three-minute walkthrough of HerePup with a sample household: adding benefit guides, confirming HSA money and bringing in claims history, then seeing what each plan is likely to cost, month by month, and where the same care costs less.",
+         "thumbnailUrl": [BASE + "/assets/herepup-walkthrough-poster.jpg"], "uploadDate": "2026-10-18T17:30:00-04:00",
+         "duration": "PT3M13S", "contentUrl": BASE + "/assets/herepup-walkthrough.mp4", "publisher": {"@id": BASE + "/#org"}}
 page("/how-it-works/", "How It Works: Estimate HDHP, PPO and EPO Costs | HerePup",
      "How HerePup models your claims history under each health plan: copay vs deductible, a what-if for the year ahead, month-by-month costs and money to set aside.",
      how, "how", [ORG, VIDEO])
