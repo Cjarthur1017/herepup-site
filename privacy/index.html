@@ -9,6 +9,12 @@
 <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
 <meta name="theme-color" content="#F6F8F7">
 <link rel="stylesheet" href="/assets/site.css">
+<!-- Privacy-friendly analytics by Plausible: anonymous visit and step counts, no cookies. Details: /privacy/#usage -->
+<script async src="https://plausible.io/js/pa-WZOZ27ZALJ2IHCY8AwOFf.js"></script>
+<script>
+  window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
+  plausible.init({outboundLinks:false,fileDownloads:false,formSubmissions:false})
+</script>
 </head>
 <body>
 <div class="wrap">
@@ -19,11 +25,12 @@
 
 <main class="doc">
 <h1>Privacy Policy</h1>
-<p class="meta">Effective October 16, 2026. Updated October 16, 2026 to cover the web version.</p>
+<p class="meta">Effective October 16, 2026. Updated October 18, 2026 to add anonymous usage counts.</p>
 
 <h2>The short version</h2>
 <ul>
   <li>HerePup runs on your own device: in your web browser at herepup.health/app, or as a desktop app. Your documents, claims and insurer data are read and stored there, and are never sent to HerePup.</li>
+  <li>To learn how many people HerePup helps, the website counts anonymous visits and a few steps, such as "Answer shown", using Plausible Analytics. It uses no cookies, and none of your documents, numbers or health information are included. <a href="#usage">Details and how to opt out</a>.</li>
   <li>HerePup does not sell, rent or share your information, and does not use it for advertising, marketing or insurance underwriting.</li>
   <li>The app connects to your health insurer only when you choose to, with your own sign-in at the insurer, and only to read your data.</li>
   <li>You can disconnect your insurer or delete all of your data in the app at any time.</li>
@@ -45,7 +52,7 @@
 
 <h2>Where your information is stored</h2>
 <p><b>Web version (herepup.health/app).</b> Your files are read by your browser on your device; they are not uploaded. What HerePup reads from them (your household, plans and claims, but not the files themselves) is saved in your browser's own storage on that device so you can come back to it. It stays there until you choose "Delete all my data" or clear your browser's site data. Anyone who uses the same browser profile on that device could see it, so use your own device and browser profile.</p>
-<p>The web version loads its program files, including the free open-source PDF reader (pdf.js) and the reader for scanned pages (Tesseract), from herepup.health itself. It does not contact any other service.</p>
+<p>The web version loads its program files, including the free open-source PDF reader (pdf.js) and the reader for scanned pages (Tesseract), from herepup.health itself. Other than the anonymous usage counts described under <a href="#usage">Usage counts</a>, it does not contact any other service.</p>
 <p><b>Desktop version.</b> Everything above is stored in the app's data folder on the computer where you run HerePup. HerePup has no servers that receive or store your health information, and we cannot see it. Copies of the data you pull from your insurer are kept in that folder so you can review exactly what was received.</p>
 <p>Because your information lives on your device, its security also depends on your device. We recommend using HerePup only on a computer you control, with a password and up-to-date software.</p>
 
@@ -55,12 +62,12 @@
 <p>You can end this access at any time with Disconnect in the app, which deletes the stored tokens. You may also manage connected apps with your insurer directly. Each adult on a plan connects separately and the app receives only the data the insurer makes available to that person.</p>
 
 <h2>Information sent to anyone else</h2>
-<p>The web version sends nothing to anyone. The desktop version sends requests directly from your computer to:</p>
+<p>The web version sends only the anonymous usage counts described under <a href="#usage">Usage counts</a>, which never include your information. The desktop version sends requests directly from your computer to:</p>
 <ul>
   <li><b>Your insurer</b>, only after you connect it, to read your own records.</li>
   <li><b>The public NPI Registry run by the U.S. Centers for Medicare &amp; Medicaid Services</b>, to look up a provider's specialty (for example, whether a visit was with a specialist). Only provider names, and a state if you enter one, are sent; never your name, amounts or diagnoses. You can turn this off in the app.</li>
 </ul>
-<p>Nothing else is sent. HerePup does not include advertising, analytics or tracking in the app.</p>
+<p>Nothing else is sent. The desktop version includes no advertising, analytics or tracking, and neither version includes advertising or tracking across other websites.</p>
 
 <h2>What we never do</h2>
 <ul>
@@ -79,8 +86,19 @@
 <h2>Children</h2>
 <p>HerePup is meant to be used by adults managing their household's coverage. A household's claims may include children's care; that information is handled the same way as everyone else's and stays on your computer.</p>
 
+<h2 id="usage">Usage counts</h2>
+<p>To know how many people use HerePup, and where they get stuck, herepup.health uses <a href="https://plausible.io/data-policy">Plausible Analytics</a>, a privacy-focused service that keeps its data in the EU. It uses no cookies and does not follow you across other websites or from one day to the next.</p>
+<p>What is counted:</p>
+<ul>
+  <li>Page visits on herepup.health, including the app at herepup.health/app.</li>
+  <li>Five steps in the app, each sent by its name only: "Plan added", "Claims added", "Answer shown", "Month by month opened" and "Feedback clicked".</li>
+</ul>
+<p>With each count, Plausible receives what any website receives: the page address, the site you came from, your browser, operating system and device type, and an approximate location (country, region and city) that it works out from your IP address. Plausible does not store your IP address; it groups the pages of one visit with an identifier that is reset every 24 hours. Plausible does not sell this data or use it for advertising.</p>
+<p>What is never sent: your documents or their file names, the names of people in your household, plan names or details, premiums, claims, providers, amounts, or any other health information. The app never puts any of these in a page address.</p>
+<p><b>Opting out.</b> Ad and tracker blockers stop these counts, or you can turn them off in this browser here: <button type="button" class="optout" id="optout">Don't count my visits</button> <span id="optout-status" role="status"></span></p>
+
 <h2>This website</h2>
-<p>herepup.health is a simple informational site hosted on GitHub Pages. It uses no cookies, analytics or tracking. Like any web host, GitHub may keep standard server logs, such as IP addresses, for security; see GitHub's privacy statement. If you email us, we use your message only to reply.</p>
+<p>herepup.health is a simple informational site hosted on GitHub Pages. It uses no cookies and no advertising or cross-site tracking; it counts anonymous visits as described under <a href="#usage">Usage counts</a>. Like any web host, GitHub may keep standard server logs, such as IP addresses, for security; see GitHub's privacy statement. If you email us, we use your message only to reply.</p>
 
 <h2>Changes to this policy</h2>
 <p>If we change this policy, we will update the date above. If a change would affect how your information is used, we will explain it in the app before it takes effect.</p>
@@ -94,5 +112,19 @@
   <div style="margin-top:8px">&copy; 2026 HerePup</div>
 </footer>
 </div>
+<script>
+(function () {
+  var b = document.getElementById("optout"), s = document.getElementById("optout-status");
+  if (!b) return;
+  function off() { try { return localStorage.getItem("plausible_ignore") === "true"; } catch (e) { return false; } }
+  function show() { b.textContent = off() ? "Count my visits again" : "Don't count my visits"; s.textContent = off() ? "Your visits in this browser are not counted." : ""; }
+  b.addEventListener("click", function () {
+    try { if (off()) localStorage.removeItem("plausible_ignore"); else localStorage.setItem("plausible_ignore", "true"); }
+    catch (e) { s.textContent = "This browser is blocking site storage, so the setting can't be saved. A tracker blocker will also stop the counts."; return; }
+    show();
+  });
+  show();
+})();
+</script>
 </body>
 </html>

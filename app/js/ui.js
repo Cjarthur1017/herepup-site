@@ -11,6 +11,15 @@ const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const usd = (n) => (n == null ? "" : (n < 0 ? "-$" : "$") + Math.abs(Math.round(n)).toLocaleString("en-US"));
 const uid = () => Math.random().toString(36).slice(2, 8);
+// Anonymous step counts (see /privacy/#usage): only the step's name is sent, once per page load. Never any data.
+const STEP_EVENTS = new Set(["Plan added", "Claims added", "Answer shown", "Month by month opened", "Feedback clicked"]);
+const tracked = new Set();
+function track(name) {
+  if (!STEP_EVENTS.has(name) || tracked.has(name)) return;
+  tracked.add(name);
+  try { if (typeof window.plausible === "function") window.plausible(name); } catch (e) { /* counting must never break the app */ }
+}
+const FEEDBACK = `<p class="feedback">Was this useful? <a href="mailto:chris@herepup.health?subject=HerePup%20feedback" data-track="Feedback clicked">Tell us how it went</a>. There's no need to include any of your numbers or health details.</p>`;
 
 async function api(path, opts = {}) {
   // Everything is handled on this device (see local.js). No network requests.
@@ -217,7 +226,7 @@ function stepAnswer() {
   const tab = (id, label) => `<button role="tab" id="tab-${id}" aria-selected="${S.answerTab === id}" aria-controls="answer-panel" tabindex="${S.answerTab === id ? 0 : -1}" data-act="answer-tab" data-tab="${id}">${label}</button>`;
   const head = `<h1>${esc(b.label)}</h1><!--MSG-->${(a.warnings || []).map((w) => `<div class="warn">${esc(w)}</div>`).join("")}
   <div class="tl-tabs" role="tablist" aria-label="Ways to see your answer">${tab("year", "Year total")}${tab("month", 'Month by month <span class="tl-new">New</span>')}</div>`;
-  const nav = `<div class="row"><button class="btn" data-go="2">Back to claims</button><button class="btn primary" data-go="4">Review your spending</button><button class="btn danger" data-act="wipe">Delete all my data</button></div>`;
+  const nav = `${FEEDBACK}<div class="row"><button class="btn" data-go="2">Back to claims</button><button class="btn primary" data-go="4">Review your spending</button><button class="btn danger" data-act="wipe">Delete all my data</button></div>`;
   if (S.answerTab === "month") {
     return `${head}<div id="answer-panel" role="tabpanel" aria-labelledby="tab-month">
     <p class="lead">Premiums come out of every paycheck, whether you see a doctor or not. Your share of care lands in the months you get care. Here is how your year would play out under each option.</p>
@@ -277,7 +286,7 @@ function stepSpending() {
   <div class="grid2"><div class="card"><h2>By type of care</h2><table class="sp"><thead><tr><th>Care</th><th class="n">Claims</th><th>Total care</th><th class="n">You paid</th></tr></thead><tbody>${types}</tbody></table></div>
   <div class="card"><h2>By person</h2><table class="sp"><thead><tr><th>Person</th><th class="n">Claims</th><th class="n">Total care</th><th class="n">You paid</th></tr></thead><tbody>${people}</tbody></table></div></div>
   <div class="card"><h2>Where your care happened</h2><div class="scroll"><table class="sp"><thead><tr><th>Provider</th><th class="n">Claims</th><th class="n">Total care</th><th class="n">You paid</th></tr></thead><tbody>${provs}</tbody></table></div></div>
-  <div class="row"><button class="btn" data-go="3">Back to your answer</button><button class="btn" data-go="2">Add more claims</button></div>`;
+  ${FEEDBACK}<div class="row"><button class="btn" data-go="3">Back to your answer</button><button class="btn" data-go="2">Add more claims</button></div>`;
 }
 
 async function runSpending() {
@@ -297,6 +306,7 @@ async function runAnalysis() {
     S.err = "";
     S.analysis = await post("/api/analyze", { multiplier: S.mult, count_hsa: S.hsa });
     try { S.timeline = await post("/api/timeline", { multiplier: S.mult, count_hsa: S.hsa }); } catch (e) { S.timeline = null; }
+    track("Answer shown");
   } catch (e) {
     S.err = e.message;
     S.analysis = null;
@@ -310,6 +320,19 @@ async function saveEmployers() {
   await post("/api/employers", { employers: S.employers, current_plan: e ? { employer: e, plan_index: Number(p) } : null }, "PUT");
 }
 
+document.addEventListener("click", (ev) => {
+  const k = ev.target.closest && ev.target.closest("[data-track]");
+  if (k) track(k.dataset.track);
+  if (ev.target.closest && ev.target.closest("[data-act=usage-ok]")) {
+    try { localStorage.setItem("herepup.usage-note", "seen"); } catch (e) { /* ignore */ }
+    const n = document.getElementById("usage-note"); if (n) n.hidden = true;
+  }
+});
+function usageNote() {
+  let seen = false;
+  try { seen = localStorage.getItem("herepup.usage-note") === "seen"; } catch (e) { /* ignore */ }
+  const n = document.getElementById("usage-note"); if (n && !seen) n.hidden = false;
+}
 document.addEventListener("click", async (ev) => {
   const t = ev.target.closest("[data-go],[data-act]");
   if (!t) return;
@@ -353,6 +376,7 @@ document.addEventListener("click", async (ev) => {
     else if (act === "hsa-copy") { const p = S.employers[+t.dataset.e].plans[+t.dataset.p]; p.hsa_employer.ee_sp = p.hsa_employer.family; p.hsa_employer.ee_ch = p.hsa_employer.family; render(); }
     else if (act === "answer-tab") {
       S.answerTab = t.dataset.tab === "month" ? "month" : "year"; render();
+      if (S.answerTab === "month") track("Month by month opened");
       const tb = document.getElementById("tab-" + S.answerTab); if (tb) tb.focus();
     }
     else if (act === "rerun") { await runPreview(); render(); }
@@ -371,7 +395,7 @@ document.addEventListener("click", async (ev) => {
       if (!S.employers.length) throw new Error("Add at least one employer.");
       for (const e of S.employers) { if (!e.name.trim()) throw new Error("Give each employer a name."); if (!e.subscriber) throw new Error(`Choose who works at ${e.name}.`); }
       for (const e of S.employers) for (const p of e.plans) if (p.hsa_eligible && !p.hsa_answered) throw new Error(`Tell us the employer HSA deposit for ${e.name}: ${p.name}, or mark it unknown.`);
-      await saveEmployers(); S.step = 2; render();
+      await saveEmployers(); track("Plan added"); S.step = 2; render();
     }
     else if (act === "reparse") {
       S.order = $("#order").value; const f = S.lastFile; if (f) await uploadClaims(f.file, f.kind, S.order);
@@ -379,7 +403,7 @@ document.addEventListener("click", async (ev) => {
     else if (act === "commit") {
       if (S.review.rows.some((x) => x.check && !x.confirmed && !x.skip)) throw new Error("Confirm or change the highlighted care types first (tick \"Confirm this type\").");
       const r = await post("/api/claims/commit", { rows: S.review.rows });
-      S.saved.claims = r.total; S.review = null; S.spending = null; S.msg = `Saved ${r.saved} claim(s).`; render();
+      S.saved.claims = r.total; S.review = null; S.spending = null; S.msg = `Saved ${r.saved} claim(s).`; if (r.saved) track("Claims added"); render();
     }
     else if (act === "discard") { S.review = null; render(); }
     else if (act === "to-answer") {
@@ -492,4 +516,5 @@ document.addEventListener("drop", async (ev) => {
   try { await handleFiles(ev.dataTransfer.files, z.dataset.drop); } catch (e) { S.busy = ""; S.err = e.message; render(); }
 });
 
+usageNote();
 load().catch((e) => { S.err = e.message; render(); });

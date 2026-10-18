@@ -46,3 +46,5 @@ footer a{margin-right:16px}
 .cta:hover{background:var(--navy)}
 @media (prefers-color-scheme:dark){.cta{background:#3FB6B0;color:#0E1A23}}
 .cta-note{color:var(--ink);font-size:15px;margin:10px 0 0}
+.optout{font:inherit;font-size:15px;font-weight:700;color:var(--navy);background:#fff;border:2px solid var(--navy);border-radius:8px;padding:6px 14px;min-height:40px;cursor:pointer;margin:4px 6px 4px 0}
+.optout:hover{background:var(--teal-l)}
