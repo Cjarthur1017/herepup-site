@@ -65,6 +65,35 @@
 <nav id="progress" aria-label="Progress"></nav>
 <main id="main" tabindex="-1"><noscript><h1>Compare your health plan options with your own claims</h1><p>HerePup reads your benefit guides and last year's claims right here in your browser and shows which plan would have cost your household least. It needs JavaScript turned on to read your documents on this device. <a href="/how-it-works/">See how it works</a>.</p></noscript></main>
 <footer class="foot">Estimates come from your own documents and are not a guarantee of cost or a substitute for your plan documents. Saved only in this browser; "Delete all my data" on the last step erases it.</footer>
+<dialog id="feedback-dialog" aria-labelledby="fb-h">
+  <form data-contact-form data-subject="HerePup feedback" data-need-one="useful,answer,stuck,message" data-need-msg="Answer at least one question, or write a note." class="fb">
+    <div class="fb-head"><h2 id="fb-h">Tell us how it went</h2><button type="button" class="btn small" data-close-dialog aria-label="Close">Close</button></div>
+    <p class="muted">This goes straight to Chris at HerePup. Please don't include claim details, amounts or other health information.</p>
+    <fieldset><legend>How useful was HerePup?</legend>
+      <label class="radio"><input type="radio" name="useful" value="Very useful">Very useful</label>
+      <label class="radio"><input type="radio" name="useful" value="Somewhat useful">Somewhat useful</label>
+      <label class="radio"><input type="radio" name="useful" value="Not useful">Not useful</label></fieldset>
+    <fieldset><legend>Did you get an answer you trust?</legend>
+      <label class="radio"><input type="radio" name="answer" value="Yes">Yes</label>
+      <label class="radio"><input type="radio" name="answer" value="Not sure">Not sure</label>
+      <label class="radio"><input type="radio" name="answer" value="No">No</label></fieldset>
+    <fieldset><legend>Where did you get stuck or slow down? <span class="muted">(pick any)</span></legend>
+      <label class="radio"><input type="checkbox" name="stuck" value="Adding people">Adding people</label>
+      <label class="radio"><input type="checkbox" name="stuck" value="Adding plan documents">Adding plan documents</label>
+      <label class="radio"><input type="checkbox" name="stuck" value="The HSA check">The HSA check</label>
+      <label class="radio"><input type="checkbox" name="stuck" value="Getting my claims">Getting my claims</label>
+      <label class="radio"><input type="checkbox" name="stuck" value="Reviewing claims">Reviewing claims</label>
+      <label class="radio"><input type="checkbox" name="stuck" value="Understanding the answer">Understanding the answer</label>
+      <label class="radio"><input type="checkbox" name="stuck" value="Nowhere">Nowhere</label></fieldset>
+    <label>What would make HerePup better?<textarea name="message" rows="4"></textarea></label>
+    <label>Your email <span class="muted">(optional, if you'd like a reply)</span><input type="email" name="email" autocomplete="email"></label>
+    <input type="checkbox" name="botcheck" style="display:none" tabindex="-1" autocomplete="off">
+    <input type="hidden" name="sent_from" value="">
+    <div class="row"><button type="submit" class="btn primary">Send feedback</button><span data-status role="status" class="muted"></span></div>
+  </form>
+  <div data-sent hidden class="fb-sent"><h2>Thank you!</h2><p>Your feedback is on its way to Chris at HerePup.</p><button type="button" class="btn primary" data-close-dialog>Close</button></div>
+</dialog>
+<script src="/assets/contact.js" defer></script>
 <script type="module" src="/app/js/ui.js"></script>
 </body>
 </html>

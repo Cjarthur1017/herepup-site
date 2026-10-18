@@ -154,3 +154,25 @@ table.tl-t tr.sa td{font-weight:700;border-top:2px solid var(--line)}
 .top .right .site-tabs a.try{background:var(--teal);color:#fff;margin-right:6px}
 .logo picture{display:flex}
 @media(max-width:800px){.top{padding-top:14px;padding-bottom:10px;flex-wrap:wrap;gap:8px}.top .right{width:100%}.top .local-note{display:none}.site-tabs{width:100%}.site-tabs a{flex:1;padding:0 6px;font-size:15px}.site-tabs a.try{flex:0 0 auto;padding:0 16px}}
+/* HSA check, plan types, per-employer drop zone */
+.drop.compact .drop-inner{min-height:0;padding:18px 16px 6px;font-size:16px}.drop.compact .drop-inner b{font-size:18px}.drop.compact .drop-icon{width:40px;height:40px}
+.drop.compact .drop-icon:before{top:9px;height:18px}.drop.compact .drop-icon:after{top:8px}
+label.radio{flex-direction:row;align-items:center;gap:10px;font-size:16px;color:var(--navy);min-height:36px}
+label.radio input{min-height:0;width:20px;height:20px;flex:none}
+.gate fieldset,.fb fieldset{border:0;padding:0;margin:8px 0 12px}
+.gate legend,.fb legend{font-weight:700;color:var(--navy);margin-bottom:6px;padding:0}
+.gate h2{font-size:20px}
+.gate-amounts{border-top:1px solid var(--line);padding-top:10px}
+.gate-amounts input{width:150px}
+label.pref{align-items:flex-start;padding:8px 0}label.pref input{margin-top:4px}
+.pref-note{background:var(--teal-l);border-radius:8px;padding:10px 12px;font-size:15px}
+.hsa-status{margin:8px 0 0}
+/* feedback dialog */
+#feedback-dialog{border:0;border-radius:14px;padding:0;max-width:600px;width:calc(100% - 32px);box-shadow:0 20px 60px rgba(15,42,68,.3);color:var(--navy)}
+#feedback-dialog::backdrop{background:rgba(15,42,68,.45)}
+.fb,.fb-sent{padding:22px}
+.fb-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.fb-head h2{margin:0}
+.fb label:not(.radio){margin:10px 0}
+.fb textarea{font:inherit;padding:10px 12px;border:1px solid #9FB3C4;border-radius:8px;width:100%;resize:vertical}
+.fb input[type=email]{width:100%}
+.copy-email{font:inherit;font-size:14px;font-weight:700;border:2px solid var(--navy);background:#fff;border-radius:8px;padding:4px 10px;cursor:pointer;margin-left:4px}

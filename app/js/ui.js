@@ -6,7 +6,7 @@ import { quickFacts } from "./timeline.js";
 import { mountTimeline } from "./timeline-view.js";
 const STEPS = ["Household", "Plan documents", "Claims", "Your answer", "Your spending"];
 const TIERS = [["ee", "Employee only"], ["ee_sp", "Employee + spouse"], ["ee_ch", "Employee + children"], ["family", "Family"]];
-const S = { step: 0, members: [], employers: [], currentPlan: "", saved: { claims: 0 }, review: null, hints: {}, detected: [], preview: null, settings: {}, drag: "", insurer: "", spending: null, busy: "", analysis: null, timeline: null, answerTab: "year", mult: 1, hsa: true, msg: "", err: "" };
+const S = { step: 0, members: [], employers: [], currentPlan: "", saved: { claims: 0 }, review: null, hints: {}, detected: [], preview: null, settings: {}, drag: "", insurer: "", spending: null, busy: "", analysis: null, timeline: null, answerTab: "year", hsaGate: false, mult: 1, hsa: true, msg: "", err: "" };
 const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const usd = (n) => (n == null ? "" : (n < 0 ? "-$" : "$") + Math.abs(Math.round(n)).toLocaleString("en-US"));
@@ -19,7 +19,19 @@ function track(name) {
   tracked.add(name);
   try { if (typeof window.plausible === "function") window.plausible(name); } catch (e) { /* counting must never break the app */ }
 }
-const FEEDBACK = `<p class="feedback">Was this useful? <a href="mailto:chris@herepup.health?subject=HerePup%20feedback" data-track="Feedback clicked">Tell us how it went</a>. There's no need to include any of your numbers or health details.</p>`;
+const FEEDBACK = `<p class="feedback">Was this useful? <button type="button" class="linkbtn" data-act="feedback-open" data-track="Feedback clicked">Tell us how it went</button>. It takes a minute, and it goes straight to Chris at HerePup.</p>`;
+function openFeedback() {
+  const d = document.getElementById("feedback-dialog"); if (!d) return;
+  const f = d.querySelector("form");
+  if (window.HerePupContact) window.HerePupContact.reset(f);
+  f.querySelector("[name=sent_from]").value = `Web app, ${STEPS[S.step]} step`;
+  if (d.showModal) d.showModal(); else d.setAttribute("open", "");
+  const first = f.querySelector("input[type=radio]"); if (first) first.focus();
+}
+document.addEventListener("click", (ev) => {
+  const c = ev.target.closest && ev.target.closest("[data-close-dialog]");
+  if (c) { const d = c.closest("dialog"); if (d && d.close) d.close(); else if (d) d.removeAttribute("open"); }
+});
 
 async function api(path, opts = {}) {
   // Everything is handled on this device (see local.js). No network requests.
@@ -33,7 +45,7 @@ const post = (p, body, method = "POST") => api(p, { method, headers: { "Content-
 
 function newPlan() {
   const z = () => ({ ee: 0, ee_sp: 0, ee_ch: 0, family: 0 });
-  return { name: "New plan", premium_annual: z(), hsa_employer: z(), hsa_eligible: false, hsa_answered: true, hsa_unknown: false, deductible_ind: 0, deductible_fam: 0, oop_ind: 0, oop_fam: 0, coinsurance: 0.2, embedded: false, rx_in_deductible: true, copays: {}, copay_after_ded: false, rx_copays: [], rx_deductible_ind: 0, rx_deductible_fam: 0, flags: [] };
+  return { name: "New plan", premium_annual: z(), hsa_employer: z(), hsa_eligible: false, hsa_answered: true, hsa_unknown: false, hsa_checked: false, deductible_ind: 0, deductible_fam: 0, oop_ind: 0, oop_fam: 0, coinsurance: 0.2, embedded: false, rx_in_deductible: true, copays: {}, copay_after_ded: false, rx_copays: [], rx_deductible_ind: 0, rx_deductible_fam: 0, flags: [] };
 }
 function setPath(obj, path, val) {
   const k = path.split(".");
@@ -54,6 +66,7 @@ async function load() {
   const cp = st.current_plan;
   S.currentPlan = cp ? `${cp.employer}:${cp.plan_index}` : "";
   if (S.members.length && S.employers.length && S.saved.claims) S.step = 3;
+  if (S.step === 3 && !hsaDone()) { S.step = 1; S.hsaGate = true; S.msg = "Before your answer: confirm the employer HSA money for each plan."; }
   else if (S.members.length && S.employers.length) S.step = 2;
   else if (S.members.length) S.step = 1;
   if (!storageWorks()) S.msg = "This browser is not letting HerePup save your work (private window or blocked storage). It will work, but nothing is kept after you close the tab.";
@@ -89,7 +102,6 @@ function planCard(e, ei, p, pi) {
       <button class="btn small" data-act="hint" data-e="${ei}" data-p="${pi}" data-k="${k}" data-v="${esc(h.value)}" data-w="fam">${k === "deductible" || k === "oop" ? "use as family" : "use"}</button>
       ${k === "deductible" || k === "oop" ? `<button class="btn small" data-act="hint" data-e="${ei}" data-p="${pi}" data-k="${k}" data-v="${esc(h.value)}" data-w="ind">use as individual</button>` : ""}</span>`).join("")).join("") : "";
   return `<div class="card"><div class="row"><label style="flex:1">Plan name<input ${bind(`${ei}.plans.${pi}.name`, "employers")} value="${esc(p.name)}"></label>
-    <label>Upload plan guide or SBC (PDF)<input type="file" accept=".pdf,.txt" data-act="plan-file" data-e="${ei}" data-p="${pi}"></label>
     <button class="btn small danger" data-act="rm-plan" data-e="${ei}" data-p="${pi}">Remove plan</button></div>
     ${hints ? `<p class="muted">Possible values found in your document. Check each against the document before using it.</p><div class="chips">${chips || "<span class=muted>Nothing recognizable was found. Enter values by hand.</span>"}</div>` : ""}
     <div class="row" style="margin:12px 0">
@@ -108,19 +120,74 @@ function planCard(e, ei, p, pi) {
       <label>Separate pharmacy deductible (person)<input type="number" min="0" ${bind(`${ei}.plans.${pi}.rx_deductible_ind`, "employers")} value="${p.rx_deductible_ind || 0}"></label>
       <label>Pharmacy deductible (family)<input type="number" min="0" ${bind(`${ei}.plans.${pi}.rx_deductible_fam`, "employers")} value="${p.rx_deductible_fam || 0}"></label></div>
     <div class="row"><label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" ${bind(`${ei}.plans.${pi}.copay_after_ded`, "employers")} ${p.copay_after_ded ? "checked" : ""}>Copays apply only after the deductible is met</label></div>
-    ${p.hsa_eligible ? (p.hsa_unknown ? `<div class="warn">HSA deposit marked unknown. The answer screen will show how the result changes across possible deposits. <button class="btn small" data-act="hsa-reopen" data-e="${ei}" data-p="${pi}">Answer now</button></div>`
-      : p.hsa_answered ? `<p class="muted"><span class="chip">Employer HSA deposit confirmed</span> <button class="btn small" data-act="hsa-reopen" data-e="${ei}" data-p="${pi}">Change</button></p>`
-      : `<div class="need" role="alert"><b>Required:</b> what does ${esc(e.name || "the employer")} put into the HSA each year for this plan? The guide does not say, and it can decide the answer. Fill in the amounts below, then confirm.
-        <div class="row" style="margin-top:8px"><button class="btn small" data-act="hsa-copy" data-e="${ei}" data-p="${pi}">Use the family amount for spouse and children levels</button><button class="btn small primary" data-act="hsa-confirm" data-e="${ei}" data-p="${pi}">Confirm these amounts</button>
-        <button class="btn small" data-act="hsa-none" data-e="${ei}" data-p="${pi}">No employer deposit</button><button class="btn small" data-act="hsa-unknown" data-e="${ei}" data-p="${pi}">I don't know yet. Show me a range.</button></div></div>`) : ""}
+    <p class="muted hsa-status">${p.hsa_checked ? (p.hsa_eligible ? `<span class="chip">HSA confirmed: ${hsaSummary(p)}</span>` : `<span class="chip">Confirmed: no HSA</span>`) : "You'll confirm this plan's HSA money on the next screen."}</p>
     <div class="scroll"><table style="margin-top:8px"><thead><tr><th>Coverage level</th><th>Your annual premium ($)</th><th>Employer HSA ($/yr)</th></tr></thead><tbody>${tierRows}</tbody></table></div></div>`;
 }
 
+const hsaDone = () => S.employers.every((e) => e.plans.every((p) => p.hsa_checked));
+const hsaSummary = (p) => {
+  const h = p.hsa_employer || {};
+  if (!h.ee && !h.ee_sp && !h.ee_ch && !h.family) return "no employer money";
+  return `${usd(h.ee)} employee only, ${usd(h.family)} family`;
+};
+const isBlankPlan = (p) => p.name === "New plan" && !p.deductible_ind && !p.oop_ind && !Object.values(p.premium_annual || {}).some(Number);
+// A guide dropped on one employer's card: its plan options go straight to that employer.
+function addGuideTo(ei, r, file) {
+  const e = S.employers[ei]; if (!e) return;
+  const d = r.detected || { plans: [] };
+  if (d.plans.length) {
+    const z = () => ({ ee: 0, ee_sp: 0, ee_ch: 0, family: 0 });
+    e.plans = e.plans.filter((p) => !isBlankPlan(p)).concat(d.plans.map((p) => ({ ...newPlan(), ...p, hsa_checked: false, hsa_employer: { ...z(), ...(p.hsa_employer || {}) } })));
+    if (!e.name.trim() && d.employer) e.name = d.employer;
+    S.msg = `Added ${d.plans.length} plan option(s) from ${file} to ${e.name || "this employer"}`.replace(/\.?$/, ". ") + "Check the numbers below.";
+  } else {
+    if (!e.plans.length) e.plans.push(newPlan());
+    if (r.hints) S.hints[`${ei}:0`] = r.hints;
+    S.msg = `${r.message || `No plan table was found in ${file}.`} Possible values are listed under the first plan; enter the rest by hand.`;
+  }
+}
+
+function hsaGate() {
+  const pref = S.settings.plan_types || "all";
+  const cards = S.employers.flatMap((e, ei) => e.plans.map((p, pi) => {
+    const id = `${ei}-${pi}`, h = p.hsa_employer || {};
+    const has = p.hsa_checked ? (p.hsa_eligible ? "yes" : "no") : (p.hsa_eligible ? "yes" : "");
+    const none = p.hsa_checked && p.hsa_eligible && !h.ee && !h.family;
+    const val = (k) => (p.hsa_checked || h[k] ? (h[k] ?? "") : "");
+    const amt = (k, label, req) => `<label>${label}${req ? "" : ' <span class="muted">(blank = family)</span>'}<input type="number" min="0" step="1" inputmode="numeric" data-gate-amt="${k}" value="${esc(val(k))}" ${none ? "disabled" : ""}></label>`;
+    return `<div class="card gate" data-gate="${id}"><h2>${esc(e.name)}: ${esc(p.name)}</h2>
+      ${!p.hsa_checked && p.hsa_eligible ? `<p class="muted">From the guide, this looks like a high-deductible plan that comes with an HSA. Check it below.</p>` : ""}
+      <fieldset class="gate-q"><legend>Does this plan come with a health savings account (HSA)?</legend>
+        <label class="radio"><input type="radio" name="gate-has-${id}" value="yes" data-gate-has ${has === "yes" ? "checked" : ""}>Yes, it's an HSA plan</label>
+        <label class="radio"><input type="radio" name="gate-has-${id}" value="no" data-gate-has ${has === "no" ? "checked" : ""}>No HSA</label></fieldset>
+      <div class="gate-amounts" ${has === "yes" ? "" : "hidden"}>
+        <p><b>How much does ${esc(e.name)} put into the HSA each year?</b> Your benefit guide or HR can tell you. Enter yearly amounts.</p>
+        <div class="row">${amt("ee", "Employee only", true)}${amt("ee_sp", "Employee + spouse", false)}${amt("ee_ch", "Employee + children", false)}${amt("family", "Family", true)}
+          <button type="button" class="btn small" data-act="hsa-gate-copy">Use the family amount for spouse and children</button></div>
+        <label class="radio" style="margin-top:8px"><input type="checkbox" data-gate-none ${none ? "checked" : ""}>${esc(e.name)} doesn't put any money into the HSA</label>
+      </div></div>`;
+  })).join("");
+  const opt = (v, label, help) => `<label class="radio pref"><input type="radio" name="plan-types" value="${v}" ${pref === v ? "checked" : ""}><span><b>${label}</b><br><span class="muted">${help}</span></span></label>`;
+  return `<h1>One more check: HSA money</h1>
+  <p class="lead">Money your employer puts into a health savings account (HSA) can decide which plan costs least, so confirm it for every plan before we work out your answer.</p><!--MSG-->
+  ${cards}
+  <div class="card"><h2>Which plans should HerePup consider?</h2>
+    <p class="muted">Some people need a certain kind of plan. For example, you may want to keep putting money into an HSA, or you may not be able to: being on Medicare or having a general health care FSA can rule out HSA contributions.</p>
+    ${opt("all", "Every plan (recommended)", "Price every option and show the cheapest overall.")}
+    ${opt("hsa", "Only plans with an HSA", "Leave out plans that don't come with an HSA.")}
+    ${opt("non_hsa", "Only plans without an HSA", "Leave out HSA plans.")}
+    <p class="muted">You can change this later on your answer.</p></div>
+  <div id="gate-err" class="err" role="alert" hidden></div>
+  <div class="row"><button class="btn" data-act="hsa-gate-back">Back to plan details</button><button class="btn primary" data-act="hsa-gate-save">Confirm and continue</button></div>`;
+}
+
 function stepPlans() {
+  if (S.hsaGate) return hsaGate();
   const memberOpts = (sel) => S.members.map((m) => `<option value="${m.id}" ${m.id === sel ? "selected" : ""}>${esc(m.name)}</option>`).join("");
   const emps = S.employers.map((e, ei) => `<section class="card" style="background:#F8FBFB"><div class="row"><label>Employer name<input ${bind(`${ei}.name`, "employers")} value="${esc(e.name)}"></label>
     <label>Who works there?<select ${bind(`${ei}.subscriber`, "employers")}><option value="">Choose...</option>${memberOpts(e.subscriber)}</select></label>
     <button class="btn small danger" data-act="rm-employer" data-e="${ei}">Remove employer</button></div>
+    ${dropZone(`plan:${ei}`, `Drop ${e.name || "this employer"}'s benefit guide here`, "PDF, typed or scanned. HerePup adds every plan option it finds to this employer.", true)}
     ${e.plans.map((p, pi) => planCard(e, ei, p, pi)).join("")}
     <button class="btn" data-act="add-plan" data-e="${ei}">Add a plan option for ${esc(e.name || "this employer")}</button></section>`).join("");
   const cur = S.employers.flatMap((e, ei) => e.plans.map((p, pi) => `<option value="${e.id}:${pi}" ${S.currentPlan === `${e.id}:${pi}` ? "selected" : ""}>${esc(e.name)}: ${esc(p.name)}</option>`)).join("");
@@ -138,7 +205,7 @@ function stepPlans() {
     <p class="muted">You can edit every number after adding it. Flags under each plan list what to double-check.</p>` : `<div class="row"><button class="btn" data-act="clear-detected" data-i="${di}">Dismiss</button></div>`}</div>`).join("");
   const uploadCard = dropZone("plan", "Drop benefit guides here", "PDF guides from each employer, typed or scanned. Drop several at once. HerePup finds every plan option in each one.") + found;
   return `<h1>What plans can your household choose from?</h1><p class="lead">Drop in each employer's benefit guide. We read out the plan options, you confirm them.</p><!--MSG-->${uploadCard}${emps}
-  <div class="row"><button class="btn" data-act="add-employer">Add an employer</button></div>
+  <div class="row"><button class="btn" data-act="add-employer">Add an employer by hand</button></div>
   <div class="card"><label>Which plan were your uploaded claims actually processed under? (used to check how well we match your carrier)<select data-act="current-plan"><option value="">Not sure / skip</option>${cur}</select></label></div>
   <div class="row"><button class="btn" data-go="0">Back</button><button class="btn primary" data-act="save-plans">Continue</button></div>`;
 }
@@ -203,10 +270,10 @@ function insurerCard() {
     <p class="muted">${S.saved.claims} claim(s) already saved in this browser.</p></div>`;
 }
 
-function dropZone(kind, title, help) {
+function dropZone(kind, title, help, compact = false) {
   const busy = S.busy && S.busyKind === kind;
-  return `<div class="card drop ${S.drag === kind ? "over" : ""} ${busy ? "busy" : ""}" data-drop="${kind}">
-    <label class="drop-inner"><input type="file" multiple accept="${kind === "plan" ? ".pdf,.txt" : ".pdf,.csv,.xlsx,.json"}" data-act="drop-pick" data-kind="${kind}" class="sr-only">
+  return `<div class="card drop ${compact ? "compact" : ""} ${S.drag === kind ? "over" : ""} ${busy ? "busy" : ""}" data-drop="${kind}">
+    <label class="drop-inner"><input type="file" multiple accept="${kind.startsWith("plan") ? ".pdf,.txt" : ".pdf,.csv,.xlsx,.json"}" data-act="drop-pick" data-kind="${kind}" class="sr-only">
       <span class="drop-icon" aria-hidden="true"></span><b>${esc(title)}</b><span class="muted">${esc(help)}</span>
       <span class="btn small as-btn">Or choose files</span></label>
     ${busy ? `<p class="muted" role="status" aria-live="polite">${esc(S.busy)}</p>` : ""}
@@ -232,15 +299,19 @@ function stepAnswer() {
     <p class="lead">Premiums come out of every paycheck, whether you see a doctor or not. Your share of care lands in the months you get care. Here is how your year would play out under each option.</p>
     <div id="timeline" class="tl">${S.timeline ? "" : "<p class='muted'>Month by month isn't available for these claims yet.</p>"}</div></div>${nav}`;
   }
+  const PREF = { hsa: "Only plans with an HSA", non_hsa: "Only plans without an HSA" };
+  const prefNote = a.plan_types && a.plan_types !== "all" ? `<p class="pref-note"><b>${PREF[a.plan_types]}</b> were considered.${a.all_best && a.all_best.label !== b.label
+    ? ` Counting every plan, the cheapest would be <b>${esc(a.all_best.label)}</b> at ${usd(a.all_best.total)}, ${usd(b.total - a.all_best.total)} less.` : " The cheapest plan overall is the same."} Change this under "Plans to consider".</p>` : "";
   const pick = S.timeline && S.timeline.options.find((o) => o.pick);
   const q = pick ? quickFacts(pick, S.timeline.window) : null;
   const month = q ? `<p class="muted">Month by month, its biggest month is ${esc(q.peakMonth)} at ${usd(q.peak)}${q.setAside ? `, so set aside about ${usd(q.setAside)} by ${esc(q.setAsideBy)}` : ""}. <button class="linkbtn" data-act="answer-tab" data-tab="month">See month by month</button></p>` : "";
   return `${head}<div id="answer-panel" role="tabpanel" aria-labelledby="tab-year">
   <div class="grid2"><div class="card"><div class="muted">Estimated cost for the year${S.mult !== 1 ? ` at ${Math.round(S.mult * 100)}% of your past use` : ""}</div><div class="bignum">${usd(b.total)}</div>
-    <p>${usd(b.premium)} premiums + ${usd(b.member_cost)} your share of care${b.hsa_offset ? ` - ${usd(b.hsa_offset)} employer HSA money` : ""}. ${second}</p><ul>${who}</ul>${month}</div>
+    <p>${usd(b.premium)} premiums + ${usd(b.member_cost)} your share of care${b.hsa_offset ? ` - ${usd(b.hsa_offset)} employer HSA money` : ""}. ${second}</p><ul>${who}</ul>${month}${prefNote}</div>
   <div class="card"><h2>What if...</h2><label>Your use of care next year compared with the claims you uploaded: <b id="mult-label">${Math.round(S.mult * 100)}%</b>
     <input type="range" min="0" max="300" step="5" value="${Math.round(S.mult * 100)}" id="mult"></label>
     <label style="flex-direction:row;align-items:center;gap:8px;margin-top:10px"><input type="checkbox" id="hsa" ${S.hsa ? "checked" : ""}>Count employer HSA money as an offset</label>
+    <label style="margin-top:12px">Plans to consider<select data-act="plan-types">${[["all", "Every plan"], ["hsa", "Only plans with an HSA"], ["non_hsa", "Only plans without an HSA"]].map(([v, l]) => `<option value="${v}" ${(S.settings.plan_types || "all") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
     <h2 style="margin-top:16px">What would change the answer</h2><ul>${flips}</ul></div></div>
   ${a.hsa_sensitivity ? `<div class="card"><h2>Employer HSA deposit is unknown for ${a.hsa_sensitivity.plans.map(esc).join(", ")}</h2><p class="muted">The numbers above assume $0. Here is the best option at each possible family deposit (smaller levels scaled to a third):</p>
     <table><thead><tr><th>Family deposit</th><th>Best option</th><th>Total</th></tr></thead><tbody>${a.hsa_sensitivity.scenarios.map((x) => `<tr><td>${usd(x.family_deposit)}</td><td>${esc(x.best)}</td><td><b>${usd(x.total)}</b></td></tr>`).join("")}</tbody></table></div>` : ""}
@@ -311,6 +382,7 @@ async function runAnalysis() {
     S.err = e.message;
     S.analysis = null;
     S.step = Math.min(S.step, 2);
+    if (e.code === "hsa") { S.step = 1; S.hsaGate = true; }
   }
   render();
 }
@@ -379,6 +451,35 @@ document.addEventListener("click", async (ev) => {
       if (S.answerTab === "month") track("Month by month opened");
       const tb = document.getElementById("tab-" + S.answerTab); if (tb) tb.focus();
     }
+    else if (act === "feedback-open") openFeedback();
+    else if (act === "hsa-gate-back") { S.hsaGate = false; render(); }
+    else if (act === "hsa-gate-copy") {
+      const box = t.closest("[data-gate]"), fam = box.querySelector('[data-gate-amt="family"]').value;
+      for (const k of ["ee_sp", "ee_ch"]) box.querySelector(`[data-gate-amt="${k}"]`).value = fam;
+    }
+    else if (act === "hsa-gate-save") {
+      const plans = [], errs = [];
+      S.employers.forEach((e, ei) => e.plans.forEach((p, pi) => {
+        const box = document.querySelector(`[data-gate="${ei}-${pi}"]`), label = `${e.name}: ${p.name}`;
+        const has = box && box.querySelector("input[data-gate-has]:checked");
+        if (!has) { errs.push(`Say whether ${label} comes with an HSA.`); return; }
+        if (has.value === "no") { plans.push([p, false, null]); return; }
+        if (box.querySelector("[data-gate-none]").checked) { plans.push([p, true, { ee: 0, ee_sp: 0, ee_ch: 0, family: 0 }]); return; }
+        const v = (k) => box.querySelector(`[data-gate-amt="${k}"]`).value.trim();
+        const bad = ["ee", "family"].filter((k) => v(k) === "" || !(Number(v(k)) >= 0));
+        if (bad.length) { errs.push(`Enter what ${e.name} puts in the HSA for ${label} (employee only and family), or tick that it doesn't put any money in.`); return; }
+        const fam = Number(v("family")), amt = (k) => (v(k) === "" ? fam : Number(v(k)));
+        plans.push([p, true, { ee: Number(v("ee")), ee_sp: amt("ee_sp"), ee_ch: amt("ee_ch"), family: fam }]);
+      }));
+      if (errs.length) { const el = document.getElementById("gate-err"); el.textContent = errs.join(" "); el.hidden = false; el.scrollIntoView({ block: "center" }); return; }
+      for (const [p, has, amounts] of plans) {
+        p.hsa_eligible = has; p.hsa_employer = amounts || { ee: 0, ee_sp: 0, ee_ch: 0, family: 0 };
+        p.hsa_checked = true; p.hsa_answered = true; p.hsa_unknown = false;
+      }
+      const pref = (document.querySelector("input[name=plan-types]:checked") || {}).value || "all";
+      S.settings = { ...S.settings, plan_types: pref }; await post("/api/settings", S.settings, "PUT");
+      await saveEmployers(); track("Plan added"); S.hsaGate = false; S.step = 2; S.analysis = null; S.timeline = null; render(); window.scrollTo(0, 0);
+    }
     else if (act === "rerun") { await runPreview(); render(); }
     else if (act === "confirm-all") { S.review.rows.forEach((r) => { if (r.check) r.confirmed = true; }); render(); }
     else if (act === "rm-plan") { S.employers[+t.dataset.e].plans.splice(+t.dataset.p, 1); render(); }
@@ -394,8 +495,8 @@ document.addEventListener("click", async (ev) => {
     else if (act === "save-plans") {
       if (!S.employers.length) throw new Error("Add at least one employer.");
       for (const e of S.employers) { if (!e.name.trim()) throw new Error("Give each employer a name."); if (!e.subscriber) throw new Error(`Choose who works at ${e.name}.`); }
-      for (const e of S.employers) for (const p of e.plans) if (p.hsa_eligible && !p.hsa_answered) throw new Error(`Tell us the employer HSA deposit for ${e.name}: ${p.name}, or mark it unknown.`);
-      await saveEmployers(); track("Plan added"); S.step = 2; render();
+      if (!S.employers.some((e) => e.plans.length)) throw new Error("Add at least one plan option.");
+      await saveEmployers(); S.hsaGate = true; render(); window.scrollTo(0, 0);
     }
     else if (act === "reparse") {
       S.order = $("#order").value; const f = S.lastFile; if (f) await uploadClaims(f.file, f.kind, S.order);
@@ -407,7 +508,9 @@ document.addEventListener("click", async (ev) => {
     }
     else if (act === "discard") { S.review = null; render(); }
     else if (act === "to-answer") {
-      if (!S.saved.claims) throw new Error("Save some claims first."); await saveEmployers(); S.step = 3; S.analysis = null; render();
+      if (!S.saved.claims) throw new Error("Save some claims first.");
+      if (!hsaDone()) { S.step = 1; S.hsaGate = true; S.msg = "Before your answer: confirm the employer HSA money for each plan."; render(); window.scrollTo(0, 0); return; }
+      await saveEmployers(); S.step = 3; S.analysis = null; render();
     }
     else if (act === "wipe") {
       if (confirm("Delete your household, plans and claims from this browser?")) { await api("/api/data", { method: "DELETE" }); location.reload(); }
@@ -426,7 +529,7 @@ async function handleFiles(files, zone, order = null) {
   files = [...files];
   if (!files.length) return;
   S.err = ""; S.msg = "";
-  const step = zone === "plan" ? 1 : 2;
+  const step = zone.startsWith("plan") ? 1 : 2;
   const results = [], errors = [];
   for (const [i, f] of files.entries()) {
     const label = files.length > 1 ? `Reading ${f.name} (${i + 1} of ${files.length})...` : `Reading ${f.name}...`;
@@ -434,7 +537,8 @@ async function handleFiles(files, zone, order = null) {
     try {
       const kind = kindFor(f, step);
       const r = await upload(f, kind, order, (p) => setBusy(zone, `${f.name}: ${p}`));
-      if (kind === "plan") {
+      if (kind === "plan" && zone.startsWith("plan:")) addGuideTo(+zone.split(":")[1], r, f.name);
+      else if (kind === "plan") {
         S.detected.push({ ...r.detected, message: r.message, file: f.name });
       } else results.push(r);
     } catch (e) { errors.push(e.message || String(e)); }
@@ -454,6 +558,12 @@ document.addEventListener("change", async (ev) => {
   const t = ev.target;
   try {
     if (t.dataset.act === "insurer") { S.insurer = t.value; render(); return; }
+    if (t.dataset.gateHas !== undefined) { const box = t.closest("[data-gate]"); box.querySelector(".gate-amounts").hidden = t.value !== "yes"; return; }
+    if (t.dataset.gateNone !== undefined) { t.closest("[data-gate]").querySelectorAll("[data-gate-amt]").forEach((i) => { i.disabled = t.checked; }); return; }
+    if (t.dataset.act === "plan-types") {
+      S.settings = { ...S.settings, plan_types: t.value }; await post("/api/settings", S.settings, "PUT");
+      S.analysis = null; S.timeline = null; render(); return;
+    }
     if (t.dataset.det !== undefined) { const d = S.detected[+t.dataset.det]; if (d) d[t.dataset.detField] = t.value; return; }
     if (t.dataset.act === "drop-pick" && t.files.length) { const fl = [...t.files]; t.value = ""; await handleFiles(fl, t.dataset.kind); return; }
     if (t.dataset.act === "guide-file" && t.files[0]) {

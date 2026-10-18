@@ -75,7 +75,10 @@ export function buildOptions(household, employers, claims, { mult = 1, countHsa 
     }
     lines.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     const single = cfg.parts.length === 1;
-    const cur = single && current && cfg.parts[0].employer === current.employer && cfg.parts[0].plan_index === Number(current.plan_index || 0);
+    // current: the plan object you're on now (matched by identity, so it survives "Plans to consider" filtering)
+    const cur = single && current && (current.employer !== undefined && !current.name
+      ? cfg.parts[0].employer === current.employer && cfg.parts[0].plan_index === Number(current.plan_index || 0)
+      : cfg.parts[0].plan === current);
     return { key, short, label: labelConfig(cfg), split: !single, pick: same(cfg, best), current: !!cur,
       premium: r2(premium), hsa: r2(hsa), parts, lines };
   }

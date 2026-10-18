@@ -153,6 +153,19 @@ function calibrateAll(s, employers, usable) {
   return merged;
 }
 
+// Every plan needs its HSA money confirmed (or confirmed as none) before an answer.
+function hsaCheck(employers) {
+  const miss = employers.flatMap((e) => e.plans.filter((pl) => !pl.hsa_checked).map((pl) => `${e.name}: ${pl.name}`));
+  if (miss.length) { const err = new Error(`Confirm the employer HSA money for ${miss.join(", ")} first.`); err.code = "hsa"; throw err; }
+}
+// "Plans to consider": every plan, only HSA plans, or only plans without an HSA. Plan objects are kept as-is.
+const planTypes = (s) => ((s.settings || {}).plan_types === "hsa" || (s.settings || {}).plan_types === "non_hsa" ? s.settings.plan_types : "all");
+function pickPlans(employers, pref) {
+  if (pref === "all") return employers;
+  const keep = (pl) => (pref === "hsa" ? !!pl.hsa_eligible : !pl.hsa_eligible);
+  return employers.map((e) => ({ ...e, plans: e.plans.filter(keep) })).filter((e) => e.plans.length);
+}
+
 // ------------------------------------------------------------------ the "API"
 export async function handle(method, path, body, file) {
   const s = load();
@@ -208,13 +221,17 @@ export async function handle(method, path, body, file) {
     if (!usable.length) throw new Error("Add claims with allowed amounts first.");
     const ids = new Set(s.household.members.map((m) => m.id));
     for (const e of employers) if (!ids.has(e.subscriber)) throw new Error(`Pick the household member who works at ${e.name}.`);
-    for (const e of employers) for (const pl of e.plans) if (pl.hsa_eligible && pl.hsa_answered === false && !pl.hsa_unknown)
-      throw new Error(`Tell us the employer HSA deposit for ${e.name}: ${pl.name} (step 2), or mark it unknown.`);
-    const res = E.analyze(s.household, employers, usable, mult, countHsa);
-    const unknown = employers.flatMap((e) => e.plans.filter((pl) => pl.hsa_unknown).map((pl) => `${e.name}: ${pl.name}`));
+    hsaCheck(employers);
+    const pref = planTypes(s), picked = pickPlans(employers, pref);
+    if (pref !== "all" && !picked.length) warnings.push(`None of your plan options ${pref === "hsa" ? "come with an HSA" : "are without an HSA"}, so every plan is shown. Change "Plans to consider" if that's not right.`);
+    const use = picked.length ? picked : employers;
+    const res = E.analyze(s.household, use, usable, mult, countHsa);
+    res.plan_types = picked.length ? pref : "all";
+    if (res.plan_types !== "all") { const all = E.analyze(s.household, employers, usable, mult, countHsa).best; res.all_best = all ? { label: all.label, total: all.total } : null; }
+    const unknown = use.flatMap((e) => e.plans.filter((pl) => pl.hsa_unknown).map((pl) => `${e.name}: ${pl.name}`));
     if (unknown.length) {
       const scenarios = [0, 1500, 3000].map((dep) => {
-        const emps2 = clone(employers);
+        const emps2 = clone(use);
         for (const e of emps2) for (const pl of e.plans) if (pl.hsa_unknown) pl.hsa_employer = { ee: dep / 3, ee_sp: dep / 3, ee_ch: dep / 3, family: dep };
         const r2 = E.analyze(s.household, emps2, usable, mult, countHsa);
         return { family_deposit: dep, best: r2.best.label, total: r2.best.total };
@@ -222,7 +239,7 @@ export async function handle(method, path, body, file) {
       res.hsa_sensitivity = { plans: unknown, scenarios };
     }
     res.warnings = warnings;
-    res.break_even = E.breakEven(s.household, employers, usable, countHsa);
+    res.break_even = E.breakEven(s.household, use, usable, countHsa);
     const cal = calibrateAll(s, employers, usable);
     if (cal) res.calibration = cal;
     res.claims_used = usable.length;
@@ -238,7 +255,9 @@ export async function handle(method, path, body, file) {
   if (method === "POST" && p === "/api/timeline") {
     const employers = s.employers.filter((e) => (e.plans || []).length), usable = s.claims.filter((c) => c.allowed);
     if (!s.household.members.length || !employers.length || !usable.length) return { window: T.planWindow(usable), options: [], defaults: [] };
-    return T.buildOptions(s.household, employers, usable, { mult: Number(body.multiplier ?? 1), countHsa: body.count_hsa !== false, current: s.current_plan });
+    const picked = pickPlans(employers, planTypes(s)), cp = s.current_plan || {};
+    const current = cp.employer ? ((s.employers.find((e) => e.id === cp.employer) || { plans: [] }).plans[cp.plan_index || 0] || null) : null;
+    return T.buildOptions(s.household, picked.length ? picked : employers, usable, { mult: Number(body.multiplier ?? 1), countHsa: body.count_hsa !== false, current });
   }
   if (method === "POST" && p === "/api/spending") {
     const claims = s.claims.filter((c) => c.allowed);

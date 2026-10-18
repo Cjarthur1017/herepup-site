@@ -100,3 +100,14 @@ footer .fine{margin-top:10px}
 .grid4{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px}
 .hub{grid-template-columns:repeat(2,minmax(0,1fr))}
 @media (max-width:560px){.hub{grid-template-columns:1fr}}
+/* contact form */
+.contact-box{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;margin:18px 0}
+.contact-form label{display:block;font-weight:700;margin:0 0 14px;color:var(--navy)}
+.contact-form .opt{font-weight:400;color:var(--ink)}
+.contact-form input,.contact-form select,.contact-form textarea{display:block;width:100%;margin-top:6px;font:inherit;font-weight:400;padding:10px 12px;min-height:44px;border:1px solid #9FB3C4;border-radius:8px;background:var(--card);color:var(--navy)}
+.contact-form textarea{resize:vertical}
+.contact-form .send{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:6px 0 0}
+.contact-form button.cta{border:0;cursor:pointer;font:inherit;font-weight:800;font-size:18px}
+.contact-form button.cta:disabled{opacity:.6;cursor:wait}
+.copy-email{font:inherit;font-size:14px;font-weight:700;border:2px solid var(--navy);background:var(--card);color:var(--navy);border-radius:8px;padding:4px 10px;cursor:pointer;margin-left:4px}
+.sent h2{margin-top:0}

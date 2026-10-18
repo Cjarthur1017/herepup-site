@@ -1,7 +1,7 @@
 """Builds herepup.health's static pages with one shared header, footer and search-engine head.
 Run from the repo root: python3 _tools/build_site.py .
 (Jekyll skips folders starting with "_", so this file is not published.)
-It reads the privacy, terms and insurers content from the last commit, so commit edits to those pages first.
+Privacy, terms and insurers keep their own content: edit inside their <main>, then rebuild.
 Existing page addresses are kept (/privacy/, /terms/, /insurers/ are linked from outside)."""
 import html, json, re, subprocess, sys
 from pathlib import Path
@@ -79,7 +79,7 @@ def header(active=None):
 
 
 FOOTER = '''<footer>
-  <nav aria-label="Footer"><a href="/app/">Try it</a><a href="/how-it-works/">How it works</a><a href="/about/">About</a><a href="/about/#faq">FAQ</a><a href="/insurers/">Insurer connections</a><a href="/privacy/">Privacy policy</a><a href="/terms/">Terms of use</a><a href="mailto:chris@herepup.health">Contact</a></nav>
+  <nav aria-label="Footer"><a href="/app/">Try it</a><a href="/how-it-works/">How it works</a><a href="/about/">About</a><a href="/about/#faq">FAQ</a><a href="/insurers/">Insurer connections</a><a href="/privacy/">Privacy policy</a><a href="/terms/">Terms of use</a><a href="/contact/">Contact</a></nav>
   <div class="fine">&copy; 2026 HerePup. Estimates, not insurance advice.</div>
 </footer>'''
 
@@ -106,8 +106,8 @@ def page(path, title, desc, body, active=None, ld=(), robots="", og_title=None, 
 
 
 def main_of(rel):
-    """Inner content of <main> in the last published version of a page."""
-    src = subprocess.run(["git", "-C", str(ROOT), "show", f"HEAD:{rel}"], capture_output=True, text=True, check=True).stdout
+    """Inner content of <main> in a page as it is now (the breadcrumb is stripped and rebuilt)."""
+    src = (ROOT / rel).read_text()
     m = re.search(r"<main[^>]*>(.*?)</main>", src, re.S)
     inner = re.sub(r'^\s*<p class="crumbs">.*?</p>\s*', "", m.group(1), flags=re.S)  # rebuilt below
     return inner.strip(), src
@@ -141,8 +141,9 @@ FAQ = [
      "Yes. If you and a spouse or partner both have employer coverage, add both benefit guides. HerePup tests every way your household "
      "can enroll, including splitting people across the two employers' plans."),
     ("Does it count employer HSA contributions?",
-     "Yes. Money your employer puts into a health savings account (HSA) is subtracted from that plan's cost. You confirm the amounts for "
-     "each coverage level, can turn the offset off, and if you don't know the amount HerePup shows how the answer changes with it."),
+     "Yes. Money your employer puts into a health savings account (HSA) is subtracted from that plan's cost. Before you see an answer, "
+     "you confirm the amount for each HSA plan, or confirm the employer puts in nothing. If you need a certain kind of plan, you can "
+     "also tell HerePup to consider only HSA plans, or only plans without one."),
     ("How accurate is it?",
      "HerePup replays each claim's allowed amount through each plan's deductibles, coinsurance, copays, prescription tiers and "
      "out-of-pocket maximums, and checks itself against what your insurer actually charged when your files include it. It is still an "
@@ -223,7 +224,7 @@ home = f'''
 <section>
   <div class="note">
     <h2 style="font-size:22px">Where HerePup is today</h2>
-    <p style="margin:0;color:var(--ink)">HerePup is in early testing, and you can <a href="/app/">try it now</a> with your own documents. Its estimates come from your own documents and are not a guarantee of cost or a substitute for your plan's documents. Questions or partnership inquiries: <a href="mailto:chris@herepup.health">chris@herepup.health</a>.</p>
+    <p style="margin:0;color:var(--ink)">HerePup is in early testing, and you can <a href="/app/">try it now</a> with your own documents. Its estimates come from your own documents and are not a guarantee of cost or a substitute for your plan's documents. Questions, feedback or partnership inquiries: <a href="/contact/">send us a message</a>.</p>
   </div>
 </section>
 </main>'''
@@ -295,7 +296,7 @@ about = f'''
 <main class="page">
 <h1>About HerePup</h1>
 <p class="lead">Every year at open enrollment, households pick a health plan by guessing. HerePup | Pick yoUr Plan replaces the guess with your own claims: it shows what each plan you can choose would really have cost you, and when.</p>
-<p>HerePup is a small, independent company. It isn't an insurer or a broker, and it doesn't sell insurance or your information. It's built to run on your own device, so your health information stays with you. HerePup is in early testing, and we'd love to hear how it works for you: <a href="mailto:chris@herepup.health">chris@herepup.health</a>.</p>
+<p>HerePup is a small, independent company. It isn't an insurer or a broker, and it doesn't sell insurance or your information. It's built to run on your own device, so your health information stays with you. HerePup is in early testing, and we'd love to hear how it works for you: <a href="/contact/">send us a message</a>.</p>
 
 <section class="faq" id="faq" aria-labelledby="faq-h">
   <h2 id="faq-h">Frequently asked questions</h2>
@@ -308,7 +309,7 @@ about = f'''
     <a class="card" href="/insurers/"><h3>Insurer connections</h3><p>Which insurers can share your claims with apps like HerePup, and how to get your claims today.</p></a>
     <a class="card" href="/privacy/"><h3>Privacy policy</h3><p>What HerePup reads, where it's stored, what's counted, and how to delete it.</p></a>
     <a class="card" href="/terms/"><h3>Terms of use</h3><p>What HerePup is, what its estimates mean, and your responsibilities.</p></a>
-    <a class="card" href="mailto:chris@herepup.health"><h3>Contact</h3><p>Questions, feedback or partnership inquiries: chris@herepup.health</p></a>
+    <a class="card" href="/contact/"><h3>Contact</h3><p>Questions, feedback or partnership inquiries. Your message goes straight to Chris at HerePup.</p></a>
   </div>
 </section>
 </main>'''
@@ -337,12 +338,38 @@ page("/terms/", "Terms of Use | HerePup",
      f'<main class="doc">\n{crumb("Terms of use")}\n{trm}\n</main>', "about",
      [ORG, crumbs_ld([("Home", "/"), ("About", "/about/"), ("Terms of use", "/terms/")])])
 
+contact = """
+<main class="page">
+<p class="crumbs"><a href="/about/">About</a> <span aria-hidden="true">›</span> Contact</p>
+<h1>Contact HerePup</h1>
+<p class="lead">Questions, feedback, or partnership and press inquiries. Your message goes straight to Chris at HerePup.</p>
+<div class="contact-box">
+<form data-contact-form data-subject="HerePup contact form" class="contact-form">
+  <label>What's this about?<select name="topic" required><option value="">Choose one</option><option>Feedback on HerePup</option><option>A question about using HerePup</option><option>Partnership or press</option><option>Something else</option></select></label>
+  <label>Your name <span class="opt">(optional)</span><input name="name" autocomplete="name"></label>
+  <label>Your email<input type="email" name="email" required autocomplete="email"></label>
+  <label>Message<textarea name="message" rows="6" required></textarea></label>
+  <input type="checkbox" name="botcheck" style="display:none" tabindex="-1" autocomplete="off">
+  <input type="hidden" name="sent_from" value="Contact page">
+  <p class="small">Please don't include claim details, amounts or other health information. See <a href="/privacy/#messages">how messages are handled</a>.</p>
+  <p class="send"><button type="submit" class="cta">Send message</button> <span data-status role="status"></span></p>
+</form>
+<div data-sent hidden class="sent"><h2>Thanks, your message is on its way.</h2><p>Chris will reply to the email address you gave. <a href="/">Back to the home page</a></p></div>
+</div>
+<p class="small">Prefer email? Write to chris@herepup.health.</p>
+</main>"""
+page("/contact/", "Contact HerePup | HerePup",
+     "Send HerePup a question, feedback, or a partnership or press inquiry. Messages go straight to the HerePup team.",
+     contact, "about", [ORG, {"@type": "ContactPage", "@id": BASE + "/contact/", "url": BASE + "/contact/", "name": "Contact HerePup", "about": {"@id": BASE + "/#org"}},
+                        crumbs_ld([("Home", "/"), ("About", "/about/"), ("Contact", "/contact/")])],
+     tail='<script src="/assets/contact.js" defer></script>\n')
+
 page("/404.html", "Page not found | HerePup", "That page doesn't exist on herepup.health.",
      '<main class="doc"><h1>Page not found</h1><p>That page doesn\'t exist. Try <a href="/app/">HerePup in your browser</a>, see <a href="/how-it-works/">how it works</a>, or go to the <a href="/">home page</a>.</p></main>',
      None, robots="noindex")
 
 # ---------------------------------------------------------------- sitemap + robots
-urls = [("/", "1.0"), ("/app/", "0.9"), ("/how-it-works/", "0.9"), ("/about/", "0.8"), ("/insurers/", "0.6"), ("/privacy/", "0.4"), ("/terms/", "0.3")]
+urls = [("/", "1.0"), ("/app/", "0.9"), ("/how-it-works/", "0.9"), ("/about/", "0.8"), ("/insurers/", "0.6"), ("/contact/", "0.5"), ("/privacy/", "0.4"), ("/terms/", "0.3")]
 (ROOT / "sitemap.xml").write_text('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
                                   + "".join(f"  <url><loc>{BASE}{u}</loc><lastmod>{TODAY}</lastmod><priority>{p}</priority></url>\n" for u, p in urls)
                                   + "</urlset>\n")
