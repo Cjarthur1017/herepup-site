@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>About HerePup and FAQ | HerePup</title>
-<meta name="description" content="What HerePup is, who it&#x27;s for, and answers to common questions: is it free, is my health data private, what do I need, how accurate is it.">
+<meta name="description" content="What HerePup is, who it&#x27;s for, and answers to common questions: when to use it, is it free, is my health data private, what do I need, how accurate is it.">
 <link rel="canonical" href="https://herepup.health/about/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="HerePup">
 <meta property="og:title" content="About HerePup and FAQ | HerePup">
-<meta property="og:description" content="What HerePup is, who it&#x27;s for, and answers to common questions: is it free, is my health data private, what do I need, how accurate is it.">
+<meta property="og:description" content="What HerePup is, who it&#x27;s for, and answers to common questions: when to use it, is it free, is my health data private, what do I need, how accurate is it.">
 <meta property="og:url" content="https://herepup.health/about/">
 <meta property="og:image" content="https://herepup.health/assets/herepup-social.png">
 <meta property="og:image:width" content="1200">
@@ -47,6 +47,14 @@
    "mainEntity": [
     {
      "@type": "Question",
+     "name": "When should I use HerePup?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Any time you're choosing or checking your coverage, not just at open enrollment: when you start a new job or weigh a job offer, after a life event such as marriage, a new baby or losing other coverage (which usually lets you change plans outside open enrollment), when a spouse's employer opens enrollment at a different time, or when you're budgeting for the year ahead."
+     }
+    },
+    {
+     "@type": "Question",
      "name": "Is HerePup free?",
      "acceptedAnswer": {
       "@type": "Answer",
@@ -66,7 +74,7 @@
      "name": "What do I need to get started?",
      "acceptedAnswer": {
       "@type": "Answer",
-      "text": "Each employer's benefit guide or plan summary (a PDF is fine, even a scanned one), and last year's claims: the explanations of benefits (EOBs) or claims spreadsheet you can download from your insurer's member website under Claims, plus pharmacy claims if you fill prescriptions. A full year of claims gives the best answer. Direct insurer connections are in testing; see insurer connections to request yours."
+      "text": "Each plan option's benefit guide or plan summary (a PDF is fine, even a scanned one), and your recent claims history: the explanations of benefits (EOBs) or claims spreadsheet you can download from your insurer's member website under Claims, plus pharmacy claims if you fill prescriptions. The last 12 months gives the best starting point. Direct insurer connections are in testing; see insurer connections to request yours."
      }
     },
     {
@@ -90,7 +98,7 @@
      "name": "How accurate is it?",
      "acceptedAnswer": {
       "@type": "Answer",
-      "text": "HerePup replays each claim's allowed amount through each plan's deductibles, coinsurance, copays, prescription tiers and out-of-pocket maximums, and checks itself against what your insurer actually charged when your files include it. It is still an estimate: prices and plan rules change, and specialty drug tiers are not modeled yet."
+      "text": "HerePup models each kind of care in your claims history under each plan's deductibles, coinsurance, copays, prescription tiers and out-of-pocket maximums, and checks the model against what your insurer actually charged when your files include it. Its estimate assumes your care looks like your history, adjusted with the What if slider. New conditions or care you don't expect can change real costs, prices and plan rules change, and specialty drug tiers are not modeled yet."
      }
     },
     {
@@ -98,7 +106,7 @@
      "name": "What if next year looks different?",
      "acceptedAnswer": {
       "@type": "Answer",
-      "text": "Use the What if slider to test anywhere from no care to three times last year's care. HerePup shows the points where a different plan would become the better choice."
+      "text": "Use the What if slider to model anywhere from no care to three times the care in your claims history. HerePup shows the points where a different plan would become the better choice, so you can pick the plan that holds up for the year you expect."
      }
     },
     {
@@ -146,18 +154,19 @@
 
 <main class="page">
 <h1>About HerePup</h1>
-<p class="lead">Every year at open enrollment, households pick a health plan by guessing. HerePup | Pick yoUr Plan replaces the guess with your own claims: it shows what each plan you can choose would really have cost you, and when.</p>
+<p class="lead">Choosing a health plan usually means guessing. HerePup | Pick yoUr Plan replaces the guess with a model built from your own claims history: it estimates what each plan you can choose is likely to cost you, and when, at open enrollment or any time your coverage options change.</p>
 <p>HerePup is a small, independent company. It isn't an insurer or a broker, and it doesn't sell insurance or your information. It's built to run on your own device, so your health information stays with you. HerePup is in early testing, and we'd love to hear how it works for you: <a href="/contact/">send us a message</a>.</p>
 
 <section class="faq" id="faq" aria-labelledby="faq-h">
   <h2 id="faq-h">Frequently asked questions</h2>
-  <details><summary><h3>Is HerePup free?</h3></summary><p>Yes. HerePup is free to use while it&#x27;s in early testing, and there&#x27;s no account to create.</p></details>
+  <details><summary><h3>When should I use HerePup?</h3></summary><p>Any time you&#x27;re choosing or checking your coverage, not just at open enrollment: when you start a new job or weigh a job offer, after a life event such as marriage, a new baby or losing other coverage (which usually lets you change plans outside open enrollment), when a spouse&#x27;s employer opens enrollment at a different time, or when you&#x27;re budgeting for the year ahead.</p></details>
+<details><summary><h3>Is HerePup free?</h3></summary><p>Yes. HerePup is free to use while it&#x27;s in early testing, and there&#x27;s no account to create.</p></details>
 <details><summary><h3>Do you see my health information?</h3></summary><p>No. HerePup runs in your web browser, on your device. Your benefit guides and claims are read there and never uploaded, and HerePup has no servers that receive them. The site only counts <a href="/privacy/#usage">anonymous visits and a few steps</a>, with no cookies. You can erase everything with "Delete all my data" in the app.</p></details>
-<details><summary><h3>What do I need to get started?</h3></summary><p>Each employer's benefit guide or plan summary (a PDF is fine, even a scanned one), and last year's claims: the explanations of benefits (EOBs) or claims spreadsheet you can download from your insurer's member website under Claims, plus pharmacy claims if you fill prescriptions. A full year of claims gives the best answer. Direct insurer connections are in testing; see <a href="/insurers/">insurer connections</a> to request yours.</p></details>
+<details><summary><h3>What do I need to get started?</h3></summary><p>Each plan option's benefit guide or plan summary (a PDF is fine, even a scanned one), and your recent claims history: the explanations of benefits (EOBs) or claims spreadsheet you can download from your insurer's member website under Claims, plus pharmacy claims if you fill prescriptions. The last 12 months gives the best starting point. Direct insurer connections are in testing; see <a href="/insurers/">insurer connections</a> to request yours.</p></details>
 <details><summary><h3>Can it compare plans from two employers?</h3></summary><p>Yes. If you and a spouse or partner both have employer coverage, add both benefit guides. HerePup tests every way your household can enroll, including splitting people across the two employers&#x27; plans.</p></details>
 <details><summary><h3>Does it count employer HSA contributions?</h3></summary><p>Yes. Money your employer puts into a health savings account (HSA) is subtracted from that plan&#x27;s cost. Before you see an answer, you confirm the amount for each HSA plan, or confirm the employer puts in nothing. If you need a certain kind of plan, you can also tell HerePup to consider only HSA plans, or only plans without one.</p></details>
-<details><summary><h3>How accurate is it?</h3></summary><p>HerePup replays each claim&#x27;s allowed amount through each plan&#x27;s deductibles, coinsurance, copays, prescription tiers and out-of-pocket maximums, and checks itself against what your insurer actually charged when your files include it. It is still an estimate: prices and plan rules change, and specialty drug tiers are not modeled yet.</p></details>
-<details><summary><h3>What if next year looks different?</h3></summary><p>Use the What if slider to test anywhere from no care to three times last year&#x27;s care. HerePup shows the points where a different plan would become the better choice.</p></details>
+<details><summary><h3>How accurate is it?</h3></summary><p>HerePup models each kind of care in your claims history under each plan&#x27;s deductibles, coinsurance, copays, prescription tiers and out-of-pocket maximums, and checks the model against what your insurer actually charged when your files include it. Its estimate assumes your care looks like your history, adjusted with the What if slider. New conditions or care you don&#x27;t expect can change real costs, prices and plan rules change, and specialty drug tiers are not modeled yet.</p></details>
+<details><summary><h3>What if next year looks different?</h3></summary><p>Use the What if slider to model anywhere from no care to three times the care in your claims history. HerePup shows the points where a different plan would become the better choice, so you can pick the plan that holds up for the year you expect.</p></details>
 <details><summary><h3>Does it check whether my doctors are in network?</h3></summary><p>No. HerePup compares costs, not networks. Before you enroll, check each plan&#x27;s provider directory for the doctors, hospitals and pharmacies you use.</p></details>
 <details><summary><h3>Is this insurance advice?</h3></summary><p>No. HerePup doesn&#x27;t sell insurance and isn&#x27;t a broker. It gives you an estimate to help you decide; your plan&#x27;s official documents decide what&#x27;s covered.</p></details>
 <details><summary><h3>Does it work on my phone?</h3></summary><p>Yes, in any up-to-date browser. Reading long or scanned PDFs is faster on a computer.</p></details>

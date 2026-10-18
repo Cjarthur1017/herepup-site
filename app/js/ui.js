@@ -251,7 +251,7 @@ function reviewTable() {
 }
 
 function stepClaims() {
-  return `<h1>Add your claims</h1><p class="lead">Drop in your explanations of benefits (EOBs) and claim summaries. We read them on this device, and you check every row.</p><!--MSG-->
+  return `<h1>Add your claims</h1><p class="lead">Drop in your explanations of benefits (EOBs) and claim summaries. The last 12 months is the best starting point. We read them on this device, and you check every row.</p><!--MSG-->
   <div class="grid2">${dropZone("claims", "Drop your claims here", "EOB PDFs, claim or pharmacy summaries (CSV or Excel), or a FHIR export from your insurer. Drop several at once; they're combined into one review.")}
   ${insurerCard()}</div>
   ${reviewTable()}
@@ -290,7 +290,7 @@ function stepAnswer() {
   const others = a.ranked.slice(0, 6).map((r, i) => `<tr class="${i === 0 ? "ok" : ""}"><td>${esc(r.label)}</td><td>${usd(r.premium)}</td><td>${usd(r.member_cost)}</td><td>${r.hsa_offset ? "-" + usd(r.hsa_offset) : "$0"}</td><td><b>${usd(r.total)}</b></td></tr>`).join("");
   const nameOf = (id) => (S.members.find((m) => m.id === id) || {}).name || id;
   const who = b.detail.map((d) => `<li><b>${esc(d.employer)}: ${esc(d.plan)}</b> covers ${d.covered.map((c) => esc(nameOf(c))).join(", ")} (${esc(d.tier)})</li>`).join("");
-  const flips = a.break_even.flips.length ? a.break_even.flips.map((f) => `<li>Between ${Math.round(f.between[0] * 100)}% and ${Math.round(f.between[1] * 100)}% of your past use, the best choice changes from <b>${esc(f.from)}</b> to <b>${esc(f.to)}</b>.</li>`).join("") : "<li>The same option wins at every level of use we tested (0% to 300% of your past use).</li>";
+  const flips = a.break_even.flips.length ? a.break_even.flips.map((f) => `<li>Between ${Math.round(f.between[0] * 100)}% and ${Math.round(f.between[1] * 100)}% of the care in your claims history, the best choice changes from <b>${esc(f.from)}</b> to <b>${esc(f.to)}</b>.</li>`).join("") : "<li>The same option wins at every level of care we tested, from none to three times the care in your claims history.</li>";
   const cal = a.calibration ? calBlock(a.calibration) : `<p class="muted">Pick the plan your claims were processed under on the plan step to see how closely we match your carrier.</p>`;
   const tab = (id, label) => `<button role="tab" id="tab-${id}" aria-selected="${S.answerTab === id}" aria-controls="answer-panel" tabindex="${S.answerTab === id ? 0 : -1}" data-act="answer-tab" data-tab="${id}">${label}</button>`;
   const head = `<h1>${esc(b.label)}</h1><!--MSG-->${(a.warnings || []).map((w) => `<div class="warn">${esc(w)}</div>`).join("")}
@@ -298,7 +298,7 @@ function stepAnswer() {
   const nav = `${FEEDBACK}<div class="row"><button class="btn" data-go="2">Back to claims</button><button class="btn primary" data-go="4">Review your spending</button><button class="btn danger" data-act="wipe">Delete all my data</button></div>`;
   if (S.answerTab === "month") {
     return `${head}<div id="answer-panel" role="tabpanel" aria-labelledby="tab-month">
-    <p class="lead">Premiums come out of every paycheck, whether you see a doctor or not. Your share of care lands in the months you get care. Here is how your year would play out under each option.</p>
+    <p class="lead">Premiums come out of every paycheck, whether you see a doctor or not. Your share of care lands in the months you get care. Here's how a year of care like yours is likely to play out under each option.</p>
     <div id="timeline" class="tl">${S.timeline ? "" : "<p class='muted'>Month by month isn't available for these claims yet.</p>"}</div></div>${nav}`;
   }
   const PREF = { hsa: "Only plans with an HSA", non_hsa: "Only plans without an HSA" };
@@ -308,9 +308,9 @@ function stepAnswer() {
   const q = pick ? quickFacts(pick, S.timeline.window) : null;
   const month = q ? `<p class="muted">Month by month, its biggest month is ${esc(q.peakMonth)} at ${usd(q.peak)}${q.setAside ? `, so set aside about ${usd(q.setAside)} by ${esc(q.setAsideBy)}` : ""}. <button class="linkbtn" data-act="answer-tab" data-tab="month">See month by month</button></p>` : "";
   return `${head}<div id="answer-panel" role="tabpanel" aria-labelledby="tab-year">
-  <div class="grid2"><div class="card"><div class="muted">Estimated cost for the year${S.mult !== 1 ? ` at ${Math.round(S.mult * 100)}% of your past use` : ""}</div><div class="bignum">${usd(b.total)}</div>
+  <div class="grid2"><div class="card"><div class="muted">Estimated yearly cost${S.mult !== 1 ? `, at ${Math.round(S.mult * 100)}% of the care in your claims history` : ", if your care looks like your claims history"}</div><div class="bignum">${usd(b.total)}</div>
     <p>${usd(b.premium)} premiums + ${usd(b.member_cost)} your share of care${b.hsa_offset ? ` - ${usd(b.hsa_offset)} employer HSA money` : ""}. ${second}</p><ul>${who}</ul>${month}${prefNote}</div>
-  <div class="card"><h2>What if...</h2><label>Your use of care next year compared with the claims you uploaded: <b id="mult-label">${Math.round(S.mult * 100)}%</b>
+  <div class="card"><h2>What if...</h2><label>How much care do you expect next year, compared with your claims history? <b id="mult-label">${Math.round(S.mult * 100)}%</b>
     <input type="range" min="0" max="300" step="5" value="${Math.round(S.mult * 100)}" id="mult"></label>
     <label style="flex-direction:row;align-items:center;gap:8px;margin-top:10px"><input type="checkbox" id="hsa" ${S.hsa ? "checked" : ""}>Count employer HSA money as an offset</label>
     <label style="margin-top:12px">Plans to consider<select data-act="plan-types">${[["all", "Every plan"], ["hsa", "Only plans with an HSA"], ["non_hsa", "Only plans without an HSA"]].map(([v, l]) => `<option value="${v}" ${(S.settings.plan_types || "all") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
@@ -349,7 +349,7 @@ function stepSpending() {
     <p>Your ${sp.er.er_visits} ER visit${sp.er.er_visits === 1 ? "" : "s"} averaged <b>${usd(sp.er.er_avg)}</b> in total care. Your ${sp.er.urgent_visits} urgent care visit${sp.er.urgent_visits === 1 ? "" : "s"} averaged <b>${usd(sp.er.urgent_avg)}</b>.
     ${sp.er.you_save_all != null ? `If ${sp.er.er_visits === 1 ? "that visit" : "those visits"} could have been handled at urgent care, you would have paid about <b>${usd(sp.er.you_save_all)}</b> less under ${esc(sp.plan_label)}.` : ""}</p>
     <p class="muted small">Only you and your doctor know whether the ER was needed. In an emergency, always go to the ER.</p></div>` : "";
-  return `<h1>Your spending</h1><!--MSG--><p class="lead">What your household's care cost from ${esc(s.from)} to ${esc(s.to)}, and where the same kind of care cost less.</p>
+  return `<h1>Your spending</h1><!--MSG--><p class="lead">What your household's care cost from ${esc(s.from)} to ${esc(s.to)}, and where the same kind of care costs less, so you can choose lower-cost care next time.</p>
   <div class="tiles"><div class="tile"><div class="muted">Total care (allowed)</div><b>${usd(s.allowed)}</b></div><div class="tile"><div class="muted">Your plan paid</div><b>${usd(s.plan_paid)}</b></div>
     <div class="tile"><div class="muted">You paid</div><b>${usd(s.paid)}</b></div><div class="tile"><div class="muted">Claims</div><b>${s.claims}</b></div></div>
   <h2 style="margin-top:28px">Could the same care have cost less?</h2>

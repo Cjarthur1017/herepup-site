@@ -78,7 +78,7 @@ export function mountTimeline(host, data, opts) {
   host.append(h("details", { cls: "card" }, h("summary", { text: "Show these numbers as a table" }), h("div", { cls: "scroll", id: "tl-table" })));
   const ms = ctx.months, span = `${ms[0].long} to ${ms[11].long}`;
   host.append(h("ul", { cls: "tl-notes" },
-    h("li", { text: `Covers ${span}${data.window.folded ? ". Your claims span more than 12 months, so they're grouped by calendar month" : ""}${opts.mult !== 1 ? `, at ${Math.round(opts.mult * 100)}% of your past use (from the What if slider)` : ""}.` }),
+    h("li", { text: `Covers ${span}${data.window.folded ? ". Your claims span more than 12 months, so they're grouped by calendar month" : ""}${opts.mult !== 1 ? `, at ${Math.round(opts.mult * 100)}% of the care in your claims history (from the What if slider)` : ""}.` }),
     h("li", { text: "Premiums are the paycheck deductions for the coverage tier each option needs. Paid every two weeks or every week, some months have an extra paycheck." }),
     anyHsa ? h("li", { text: opts.countHsa ? "Employer HSA money is shown below the line because it comes in rather than goes out. Check with your employer how and when they deposit it." : "Employer HSA money is left out because \"Count employer HSA money\" is off on the Year total tab." }) : null,
     h("li", { text: "Set aside is the most you'd fall behind if you budgeted the option's average monthly cost, before later, quieter months catch up. It assumes nothing is saved at the start of the year; an HSA balance you already have counts toward it." })));
