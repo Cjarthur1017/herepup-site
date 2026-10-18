@@ -131,12 +131,12 @@ FAQ = [
     ("What do I need to get started?",
      "Each employer's benefit guide or plan summary (a PDF is fine, even a scanned one), and last year's claims: the explanations of "
      "benefits (EOBs) or claims spreadsheet you can download from your insurer's member website under Claims, plus pharmacy claims "
-     "if you fill prescriptions. A full year of claims gives the best answer. See insurer connections for insurers that can share "
-     "claims directly.",
+     "if you fill prescriptions. A full year of claims gives the best answer. Direct insurer connections are in testing; see insurer "
+     "connections to request yours.",
      "Each employer's benefit guide or plan summary (a PDF is fine, even a scanned one), and last year's claims: the explanations of "
      "benefits (EOBs) or claims spreadsheet you can download from your insurer's member website under Claims, plus pharmacy claims "
-     'if you fill prescriptions. A full year of claims gives the best answer. See <a href="/insurers/">insurer connections</a> for '
-     "insurers that can share claims directly."),
+     'if you fill prescriptions. A full year of claims gives the best answer. Direct insurer connections are in testing; see '
+     '<a href="/insurers/">insurer connections</a> to request yours.'),
     ("Can it compare plans from two employers?",
      "Yes. If you and a spouse or partner both have employer coverage, add both benefit guides. HerePup tests every way your household "
      "can enroll, including splitting people across the two employers' plans."),
@@ -253,7 +253,7 @@ how = '''
 <ol class="steps">
   <li><h3>Tell HerePup who's covered</h3><p>Add each person in your household and whether they're an adult or a child. HerePup uses this to pick the right coverage level for every option: employee only, employee plus spouse, employee plus children, or family.</p></li>
   <li><h3>Add your plan options</h3><p>Drag in each employer's benefit guide or plan summary. Typed and scanned PDFs both work. HerePup reads the premiums for each coverage level, deductibles, out-of-pocket maximums, coinsurance, office, specialist, urgent care and ER copays, prescription tiers and employer HSA contributions. You check and confirm every number. If you and a spouse or partner have different employers, add both.</p></li>
-  <li><h3>Bring in last year's claims</h3><p>Drag in your explanations of benefits (EOBs), the claims spreadsheet from your insurer's member website, and your pharmacy claims. HerePup works out what kind of care each claim was, such as an office visit, a specialist, urgent care, the ER, a procedure or a prescription, and asks you to confirm anything it isn't sure about. Some insurers can also <a href="/insurers/">share claims directly</a>.</p></li>
+  <li><h3>Bring in last year's claims</h3><p>Drag in your explanations of benefits (EOBs), the claims spreadsheet from your insurer's member website, and your pharmacy claims. HerePup works out what kind of care each claim was, such as an office visit, a specialist, urgent care, the ER, a procedure or a prescription, and asks you to confirm anything it isn't sure about. Direct connections to insurers are <a href="/insurers/">in testing</a>, and you can request yours.</p></li>
   <li><h3>See what every option would cost</h3><p>Each claim is replayed through every plan and every way your household could enroll. You see which plan would have charged a flat copay and which the full deductible, when coinsurance and out-of-pocket maximums kick in, and the total: premiums plus your share of care, minus employer HSA money. When your files include what your insurer actually charged, HerePup checks its own math against it.</p></li>
   <li><h3>See it month by month</h3><p>A low-deductible plan spreads its cost evenly through premiums; a high-deductible plan costs less up front but can bring big bills in the months you need care. The month-by-month view shows when each plan's costs would land, and how much to set aside for the expensive months.</p></li>
   <li><h3>Spend less on the same care</h3><p>HerePup also looks across your claims for the same kind of care at different providers, such as two urgent care centers, the same test at two labs or the same drug at two pharmacies, and shows what you'd have saved at the lower-cost one.</p></li>
@@ -306,7 +306,7 @@ about = f'''
 <section aria-labelledby="more-h">
   <h2 id="more-h">More about HerePup</h2>
   <div class="grid3 hub">
-    <a class="card" href="/insurers/"><h3>Insurer connections</h3><p>Which insurers can share your claims with apps like HerePup, and how to get your claims today.</p></a>
+    <a class="card" href="/insurers/"><h3>Insurer connections</h3><p>Which insurers can share claims with apps like HerePup, how to get your claims today, and how to request yours.</p></a>
     <a class="card" href="/privacy/"><h3>Privacy policy</h3><p>What HerePup reads, where it's stored, what's counted, and how to delete it.</p></a>
     <a class="card" href="/terms/"><h3>Terms of use</h3><p>What HerePup is, what its estimates mean, and your responsibilities.</p></a>
     <a class="card" href="/contact/"><h3>Contact</h3><p>Questions, feedback or partnership inquiries. Your message goes straight to Chris at HerePup.</p></a>
@@ -321,9 +321,10 @@ page("/about/", "About HerePup and FAQ | HerePup",
 # ---------------------------------------------------------------- existing pages, same content, new shell
 ins, _ = main_of("insurers/index.html")
 page("/insurers/", "Insurer Claims Connections (Patient Access APIs) | HerePup",
-     "Which health insurers let you share claims with apps like HerePup through a Patient Access API, who each covers, and how to download your claims today.",
+     "Which health insurers let you share claims with apps like HerePup through a Patient Access API, who each covers, how to download your claims today, and how to request yours.",
      f'<main class="doc" style="max-width:980px">\n{crumb("Insurer connections")}\n{ins}\n</main>', "about",
-     [ORG, crumbs_ld([("Home", "/"), ("About", "/about/"), ("Insurer connections", "/insurers/")])])
+     [ORG, crumbs_ld([("Home", "/"), ("About", "/about/"), ("Insurer connections", "/insurers/")])],
+     tail='<script src="/assets/contact.js" defer></script>\n')
 
 prv, prv_src = main_of("privacy/index.html")
 tail = re.search(r"</footer>\s*</div>\s*(<script>.*?</script>)", prv_src, re.S).group(1) + "\n"

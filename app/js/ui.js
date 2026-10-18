@@ -66,9 +66,9 @@ async function load() {
   const cp = st.current_plan;
   S.currentPlan = cp ? `${cp.employer}:${cp.plan_index}` : "";
   if (S.members.length && S.employers.length && S.saved.claims) S.step = 3;
-  if (S.step === 3 && !hsaDone()) { S.step = 1; S.hsaGate = true; S.msg = "Before your answer: confirm the employer HSA money for each plan."; }
   else if (S.members.length && S.employers.length) S.step = 2;
   else if (S.members.length) S.step = 1;
+  if (S.step === 3 && !hsaDone()) { S.step = 1; S.hsaGate = true; S.msg = "Before your answer: confirm the employer HSA money for each plan."; }
   if (!storageWorks()) S.msg = "This browser is not letting HerePup save your work (private window or blocked storage). It will work, but nothing is kept after you close the tab.";
   render();
 }
@@ -258,6 +258,7 @@ function stepClaims() {
   <div class="row"><button class="btn" data-go="1">Back</button><button class="btn primary" data-act="to-answer">See my answer</button></div>`;
 }
 
+const BELL = `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>`;
 function insurerCard() {
   const ins = INSURERS.find((x) => x.id === S.insurer);
   const opts = `<option value="">Choose your insurer...</option>` + INSURERS.map((x) => `<option value="${x.id}" ${x.id === S.insurer ? "selected" : ""}>${esc(x.name)}</option>`).join("");
@@ -265,7 +266,8 @@ function insurerCard() {
     : `<ol class="muted steps-list"><li>Sign in to ${ins.member ? `<a href="${esc(ins.member)}" target="_blank" rel="noopener">your ${esc(ins.name)} member site</a>` : "your insurer's member website"} or app.</li>
         <li>Open <b>Claims</b>. Look for <b>Download</b> or <b>Export</b> to get a spreadsheet of all claims, or open each claim's explanation of benefits (EOB) as a PDF.</li>
         <li>Drop the files here.</li></ol>
-      ${ins.id !== "other" ? `<p class="muted"><b>Direct connection:</b> ${esc(ins.name)} publishes a Patient Access API. ${esc(ins.covers)} HerePup status: ${esc(ins.herepup)}. <a href="/insurers/">About insurer connections</a></p>` : ""}`;
+      ${ins.id !== "other" ? `<p class="muted"><b>Direct connection (in testing):</b> ${esc(ins.name)} publishes a Patient Access API. ${esc(ins.covers)} HerePup status: ${esc(ins.herepup)}. <a href="/insurers/">About insurer connections</a></p>` : ""}
+      <p><button type="button" class="req-btn" data-request-insurer="${esc(ins.id === "other" ? "" : ins.name.replace(/\s*\(.*?\)/, ""))}" data-from="Web app, Claims step">${BELL}${ins.id === "other" ? "Request your insurer" : `Request a direct connection to ${esc(ins.name)}`}</button></p>`;
   return `<div class="card"><h2>Get your claims from your insurer</h2><label>Your insurer<select data-act="insurer">${opts}</select></label>${body}
     <p class="muted">${S.saved.claims} claim(s) already saved in this browser.</p></div>`;
 }

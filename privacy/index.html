@@ -75,11 +75,11 @@
 <main class="doc">
 <p class="crumbs"><a href="/about/">About</a> <span aria-hidden="true">›</span> Privacy policy</p>
 <h1>Privacy Policy</h1>
-<p class="meta">Effective October 16, 2026. Updated October 18, 2026 to add anonymous usage counts and the feedback and contact forms.</p>
+<p class="meta">Effective October 16, 2026. Updated October 18, 2026 to add anonymous usage counts, the feedback and contact forms, and insurer requests.</p>
 
 <h2>The short version</h2>
 <ul>
-  <li>HerePup runs on your own device: in your web browser at herepup.health/app, or as a desktop app. Your documents, claims and insurer data are read and stored there, and are never sent to HerePup.</li>
+  <li>HerePup runs on your own device, in your web browser at herepup.health/app. (A desktop version with direct insurer connections is in private testing.) Your documents, claims and insurer data are read and stored there, and are never sent to HerePup.</li>
   <li>To learn how many people HerePup helps, the website counts anonymous visits and a few steps, such as "Answer shown", using Plausible Analytics. It uses no cookies, and none of your documents, numbers or health information are included. <a href="#usage">Details and how to opt out</a>.</li>
   <li>HerePup does not sell, rent or share your information, and does not use it for advertising, marketing or insurance underwriting.</li>
   <li>The app connects to your health insurer only when you choose to, with your own sign-in at the insurer, and only to read your data.</li>
@@ -103,11 +103,11 @@
 <h2>Where your information is stored</h2>
 <p><b>Web version (herepup.health/app).</b> Your files are read by your browser on your device; they are not uploaded. What HerePup reads from them (your household, plans and claims, but not the files themselves) is saved in your browser's own storage on that device so you can come back to it. It stays there until you choose "Delete all my data" or clear your browser's site data. Anyone who uses the same browser profile on that device could see it, so use your own device and browser profile.</p>
 <p>The web version loads its program files, including the free open-source PDF reader (pdf.js) and the reader for scanned pages (Tesseract), from herepup.health itself. Other than the anonymous usage counts described under <a href="#usage">Usage counts</a>, it does not contact any other service.</p>
-<p><b>Desktop version.</b> Everything above is stored in the app's data folder on the computer where you run HerePup. HerePup has no servers that receive or store your health information, and we cannot see it. Copies of the data you pull from your insurer are kept in that folder so you can review exactly what was received.</p>
+<p><b>Desktop version (in private testing, not publicly available).</b> Everything above is stored in the app's data folder on the computer where you run HerePup. HerePup has no servers that receive or store your health information, and we cannot see it. Copies of the data you pull from your insurer are kept in that folder so you can review exactly what was received.</p>
 <p>Because your information lives on your device, its security also depends on your device. We recommend using HerePup only on a computer you control, with a password and up-to-date software.</p>
 
 <h2>Connecting to your insurer</h2>
-<p>Connecting directly to an insurer is available in the desktop version only. In the web version you download your claims from your insurer yourself and drop the files in.</p>
+<p>Direct insurer connections are in testing in a private desktop version and aren't available to the public yet. Today you download your claims from your insurer yourself and drop the files in. The rest of this section describes how connections work in testing, and how they will work once insurers approve HerePup.</p>
 <p>When you choose to connect an insurer (for example, Aetna), the app sends you to the insurer's own sign-in page. You sign in there and approve read-only access; HerePup never sees or stores your insurer username or password. The insurer then gives the app an access token, which is stored on your computer and used only when you ask the app to pull claims.</p>
 <p>You can end this access at any time with Disconnect in the app, which deletes the stored tokens. You may also manage connected apps with your insurer directly. Each adult on a plan connects separately and the app receives only the data the insurer makes available to that person.</p>
 
@@ -141,14 +141,14 @@
 <p>What is counted:</p>
 <ul>
   <li>Page visits on herepup.health, including the app at herepup.health/app.</li>
-  <li>Five steps in the app, each sent by its name only: "Plan added", "Claims added", "Answer shown", "Month by month opened" and "Feedback clicked".</li>
+  <li>A few steps, each sent by its name only: "Plan added", "Claims added", "Answer shown", "Month by month opened", "Feedback clicked" and "Insurer requested". The last one doesn't say which insurer.</li>
 </ul>
 <p>With each count, Plausible receives what any website receives: the page address, the site you came from, your browser, operating system and device type, and an approximate location (country, region and city) that it works out from your IP address. Plausible does not store your IP address; it groups the pages of one visit with an identifier that is reset every 24 hours. Plausible does not sell this data or use it for advertising.</p>
 <p>What is never sent: your documents or their file names, the names of people in your household, plan names or details, premiums, claims, providers, amounts, or any other health information. The app never puts any of these in a page address.</p>
 <p><b>Opting out.</b> Ad and tracker blockers stop these counts, or you can turn them off in this browser here: <button type="button" class="optout" id="optout">Don't count my visits</button> <span id="optout-status" role="status"></span></p>
 
 <h2 id="messages">Messages you send us</h2>
-<p>If you fill in the feedback questionnaire in the app or the form on our <a href="/contact/">contact page</a>, what you type is sent through Web3Forms, a form service, to our email so we can read it and reply. That includes your email address only if you enter it. The app never adds your documents, plans, claims or amounts to a message, and we ask you not to type health information into one. Web3Forms may keep a copy for a limited time under its own privacy policy. We use messages only to improve HerePup and to reply to you.</p>
+<p>If you fill in the feedback questionnaire in the app, request an insurer connection, or use the form on our <a href="/contact/">contact page</a>, what you type is sent through Web3Forms, a form service, to our email so we can read it and reply. That includes your email address only if you enter it. The app never adds your documents, plans, claims or amounts to a message, and we ask you not to type health information into one. Web3Forms may keep a copy for a limited time under its own privacy policy. We use messages only to improve HerePup, to decide which insurers to connect first, and to reply to you. If you give your email with an insurer request, we write to you only about that insurer's connection.</p>
 
 <h2>This website</h2>
 <p>herepup.health is a simple informational site hosted on GitHub Pages. It uses no cookies and no advertising or cross-site tracking; it counts anonymous visits as described under <a href="#usage">Usage counts</a>. Like any web host, GitHub may keep standard server logs, such as IP addresses, for security; see GitHub's privacy statement. If you email us, we use your message only to reply.</p>
