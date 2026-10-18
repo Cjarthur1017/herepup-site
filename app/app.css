@@ -147,3 +147,10 @@ table.tl-t tr.sa td{font-weight:700;border-top:2px solid var(--line)}
 .usage-note{max-width:1104px;margin:0 auto 12px;display:flex;gap:12px;align-items:center;justify-content:space-between;background:var(--teal-l);border-radius:10px;padding:10px 14px;font-size:15px}
 .usage-note[hidden]{display:none}.usage-note p{margin:0}.usage-note a{color:#075b5b;font-weight:700}
 @media(max-width:800px){.usage-note{margin:0 16px 12px;flex-direction:column;align-items:flex-start}}
+.site-tabs{display:flex;gap:4px;align-items:center}
+.site-tabs a{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 14px;border-radius:10px;font-size:16px;font-weight:600;color:var(--ink);text-decoration:none}
+.top .right .site-tabs a{color:var(--ink);font-size:16px}
+.site-tabs a:hover{background:var(--teal-l);color:var(--navy)}
+.top .right .site-tabs a.try{background:var(--teal);color:#fff;margin-right:6px}
+.logo picture{display:flex}
+@media(max-width:800px){.top{padding-top:14px;padding-bottom:10px;flex-wrap:wrap;gap:8px}.top .right{width:100%}.top .local-note{display:none}.site-tabs{width:100%}.site-tabs a{flex:1;padding:0 6px;font-size:15px}.site-tabs a.try{flex:0 0 auto;padding:0 16px}}

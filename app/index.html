@@ -3,8 +3,48 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HerePup | Pick yoUr Plan</title>
-<meta name="description" content="Compare your health plan options with your own claims. Runs in your browser; your files never leave your device.">
+<title>HerePup App: Compare Your Health Plan Options in Your Browser</title>
+<meta name="description" content="Drag in your benefit guides and claims to see which health plan would cost your household least. Runs in your browser; your files never leave your device.">
+<link rel="canonical" href="https://herepup.health/app/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="HerePup">
+<meta property="og:title" content="HerePup app: compare your health plan options">
+<meta property="og:description" content="Drag in your benefit guides and claims to see which health plan would cost your household least. Runs in your browser; your files never leave your device.">
+<meta property="og:url" content="https://herepup.health/app/">
+<meta property="og:image" content="https://herepup.health/assets/herepup-social.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="HerePup's golden retriever mascot with the words: Pick the health plan that costs you least, using your own claims, privately, right in your browser.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#F3F6F5">
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@graph": [
+  {
+   "@type": "WebApplication",
+   "@id": "https://herepup.health/app/#app",
+   "name": "HerePup | Pick yoUr Plan",
+   "url": "https://herepup.health/app/",
+   "applicationCategory": "FinanceApplication",
+   "operatingSystem": "Any (runs in a web browser)",
+   "browserRequirements": "Requires JavaScript",
+   "description": "Compares every health plan your household can enroll in, across employers, by replaying your own claims through each plan's premiums, deductibles, copays, coinsurance and HSA contributions. Runs in your browser; your files are not uploaded.",
+   "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+   },
+   "publisher": {
+    "@type": "Organization",
+    "@id": "https://herepup.health/#org",
+    "name": "HerePup",
+    "url": "https://herepup.health/"
+   }
+  }
+ ]
+}
+</script>
 <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png">
 <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
 <link rel="stylesheet" href="/app/app.css">
@@ -17,13 +57,13 @@
 </head>
 <body>
 <header class="top">
-  <a class="logo" href="/" aria-label="HerePup home"><img src="/assets/herepup-mascot-sm.png" alt="" width="56" height="44"><b>Here<span>Pup</span></b></a>
+  <a class="logo" href="/" aria-label="HerePup home"><picture><source srcset="/assets/herepup-mascot-sm.webp" type="image/webp"><img src="/assets/herepup-mascot-sm.png" alt="" width="56" height="44"></picture><b>Here<span>Pup</span></b></a>
   <div class="right"><span class="local-note" title="Files are read by this browser on this device. HerePup has no server that receives them.">Runs in your browser: your files never leave this device</span>
-    <a href="/privacy/">Privacy</a></div>
+    <nav class="site-tabs" aria-label="Main"><a href="/app/" class="try" aria-current="page">Try it</a><a href="/how-it-works/">How it works</a><a href="/about/">About</a></nav></div>
 </header>
 <div id="usage-note" class="usage-note" hidden><p>New: HerePup now counts anonymous visits and a few steps, like "Answer shown", to learn how many people it helps. No cookies, and none of your documents, numbers or health information are included. <a href="/privacy/#usage">Details, or turn it off</a></p><button type="button" class="btn small" data-act="usage-ok">OK</button></div>
 <nav id="progress" aria-label="Progress"></nav>
-<main id="main" tabindex="-1"><noscript><p>HerePup needs JavaScript turned on to read your documents on this device.</p></noscript></main>
+<main id="main" tabindex="-1"><noscript><h1>Compare your health plan options with your own claims</h1><p>HerePup reads your benefit guides and last year's claims right here in your browser and shows which plan would have cost your household least. It needs JavaScript turned on to read your documents on this device. <a href="/how-it-works/">See how it works</a>.</p></noscript></main>
 <footer class="foot">Estimates come from your own documents and are not a guarantee of cost or a substitute for your plan documents. Saved only in this browser; "Delete all my data" on the last step erases it.</footer>
 <script type="module" src="/app/js/ui.js"></script>
 </body>

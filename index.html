@@ -3,13 +3,66 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HerePup | Pick yoUr Plan</title>
-<meta property="og:image" content="https://herepup.health/assets/herepup-walkthrough-poster.jpg">
-<meta name="description" content="HerePup replays your real claims through every health plan your household can choose, so you can pick the plan that actually costs you least.">
+<title>Compare Health Plans With Your Own Claims | HerePup</title>
+<meta name="description" content="Pick the health plan that costs you least. HerePup replays your own claims through every HDHP, PPO and EPO option you can choose, privately in your browser.">
+<link rel="canonical" href="https://herepup.health/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="HerePup">
+<meta property="og:title" content="HerePup: compare health plans with your own claims">
+<meta property="og:description" content="Pick the health plan that costs you least. HerePup replays your own claims through every HDHP, PPO and EPO option you can choose, privately in your browser.">
+<meta property="og:url" content="https://herepup.health/">
+<meta property="og:image" content="https://herepup.health/assets/herepup-social.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="HerePup's golden retriever mascot with the words: Pick the health plan that costs you least, using your own claims, privately, right in your browser.">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png">
 <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
 <meta name="theme-color" content="#F6F8F7">
 <link rel="stylesheet" href="/assets/site.css">
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@graph": [
+  {
+   "@type": "Organization",
+   "@id": "https://herepup.health/#org",
+   "name": "HerePup",
+   "url": "https://herepup.health/",
+   "logo": "https://herepup.health/assets/icon-512.png",
+   "email": "chris@herepup.health"
+  },
+  {
+   "@type": "WebSite",
+   "@id": "https://herepup.health/#website",
+   "url": "https://herepup.health/",
+   "name": "HerePup",
+   "alternateName": "HerePup | Pick yoUr Plan",
+   "publisher": {
+    "@id": "https://herepup.health/#org"
+   }
+  },
+  {
+   "@type": "WebApplication",
+   "@id": "https://herepup.health/app/#app",
+   "name": "HerePup | Pick yoUr Plan",
+   "url": "https://herepup.health/app/",
+   "applicationCategory": "FinanceApplication",
+   "operatingSystem": "Any (runs in a web browser)",
+   "browserRequirements": "Requires JavaScript",
+   "description": "Compares every health plan your household can enroll in, across employers, by replaying your own claims through each plan's premiums, deductibles, copays, coinsurance and HSA contributions. Runs in your browser; your files are not uploaded.",
+   "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+   },
+   "publisher": {
+    "@id": "https://herepup.health/#org"
+   }
+  }
+ ]
+}
+</script>
 <!-- Privacy-friendly analytics by Plausible: anonymous visit and step counts, no cookies. Details: /privacy/#usage -->
 <script async src="https://plausible.io/js/pa-WZOZ27ZALJ2IHCY8AwOFf.js"></script>
 <script>
@@ -20,8 +73,8 @@
 <body>
 <div class="wrap">
 <header class="top">
-  <a class="logo" href="/" aria-label="HerePup home"><img src="/assets/herepup-mascot-sm.png" alt="" width="56" height="44"><b>Here<span>Pup</span></b></a>
-  <nav><a href="/app/"><b>Try it</b></a><a href="#how">How it works</a><a href="/insurers/">Insurers</a><a href="#privacy">Privacy</a><a href="/privacy/">Privacy policy</a><a href="/terms/">Terms</a></nav>
+  <a class="logo" href="/" aria-label="HerePup home"><picture><source srcset="/assets/herepup-mascot-sm.webp" type="image/webp"><img src="/assets/herepup-mascot-sm.png" alt="" width="56" height="44"></picture><b>Here<span>Pup</span></b></a>
+  <nav class="tabs" aria-label="Main"><a href="/app/" class="try">Try it</a><a href="/how-it-works/">How it works</a><a href="/about/">About</a></nav>
 </header>
 
 <main>
@@ -29,30 +82,26 @@
   <div class="hero-text">
     <span class="eyebrow">Pick yoUr Plan</span>
     <h1>Choose your health plan with your own claims, not a guess.</h1>
-    <p class="lead">HerePup runs last year's real claims through every plan your household can enroll in, across every employer, and shows which choice would have cost you least, once premiums, deductibles, copays and HSA money are counted.</p>
+    <p class="lead">At open enrollment, HerePup runs last year's real claims through every plan your household can enroll in, whether HDHP, PPO or EPO and across every employer, and shows which choice would have cost you least once premiums, deductibles, copays and HSA money are counted.</p>
     <p style="margin:22px 0 0"><a class="cta" href="/app/">Try HerePup in your browser</a></p>
     <p class="cta-note">Drag in your benefit guides and claims. They're read on your device and never uploaded.</p>
   </div>
-  <img class="mascot" src="/assets/herepup-mascot.png" alt="HerePup's golden retriever mascot carrying a rolled-up plan" width="760" height="601">
+  <picture><source srcset="/assets/herepup-mascot.webp" type="image/webp"><img class="mascot" src="/assets/herepup-mascot.png" alt="HerePup's golden retriever mascot carrying a rolled-up plan" width="760" height="601" fetchpriority="high"></picture>
 </div>
 
-<section id="watch" style="padding:8px 0 4px">
-  <h2>See how it works <span style="font-weight:400;color:var(--ink);font-size:18px">(2 minutes)</span></h2>
-  <video controls playsinline preload="none" poster="/assets/herepup-walkthrough-poster.jpg"
-         style="width:100%;height:auto;aspect-ratio:16/9;border-radius:14px;border:1px solid var(--line);background:#F6F9F8">
-    <source src="/assets/herepup-walkthrough.mp4" type="video/mp4">
-    <track kind="captions" src="/assets/herepup-walkthrough.en.vtt" srclang="en" label="English">
-    Your browser can't play this video. <a href="/assets/herepup-walkthrough.mp4">Download it</a> instead.
-  </video>
-  <p style="color:var(--ink);font-size:14px;margin:8px 0 0">Shown with a made-up household and sample documents.</p>
+<section id="how" class="tight">
+  <h2>How it works</h2>
+  <div class="grid4" style="margin:14px 0 18px">
+    <div class="card"><div class="num">1</div><h3>Add your plan options</h3><p>Drag in each employer's benefit guide, typed or scanned. HerePup reads the plan options, premiums, deductibles and copays, and you confirm every number.</p></div>
+    <div class="card"><div class="num">2</div><h3>Bring in your claims</h3><p>Drag in your explanations of benefits and the claim or pharmacy summaries you can download from your insurer's website.</p></div>
+    <div class="card"><div class="num">3</div><h3>See what each plan would cost</h3><p>Each claim is replayed through every plan, so you see which would have charged a copay and which the full deductible. See month by month when the costs would land and how much to set aside, then test heavier or lighter years.</p></div>
+    <div class="card"><div class="num">4</div><h3>Spend less on the same care</h3><p>See where your money went, and where the same kind of care cost less: one urgent care against another, the same test at two labs, the same drug at two pharmacies.</p></div>
+  </div>
+  <a class="video-teaser" href="/how-it-works/#watch">
+    <img src="/assets/herepup-walkthrough-poster.jpg" alt="" width="1920" height="1080" loading="lazy">
+    <span><b>Watch the 2-minute walkthrough</b><br>See a sample household go from benefit guides to an answer, step by step.</span>
+  </a>
 </section>
-
-<div class="grid3" id="how">
-  <div class="card"><div class="num">1</div><h3>Add your plan options</h3><p>Drag in each employer's benefit guide, typed or scanned. HerePup reads the plan options, premiums, deductibles and copays, and you confirm every number.</p></div>
-  <div class="card"><div class="num">2</div><h3>Bring in your claims</h3><p>Drag in your explanations of benefits and the claim or pharmacy summaries you can download from your insurer's website.</p></div>
-  <div class="card"><div class="num">3</div><h3>See what each plan would cost</h3><p>Each claim is replayed through every plan, so you see which would have charged a copay and which the full deductible. See month by month when the costs would land and how much to set aside, then test heavier or lighter years.</p></div>
-  <div class="card"><div class="num">4</div><h3>Spend less on the same care</h3><p>See where your money went, and where the same kind of care cost less: one urgent care against another, the same test at two labs, the same drug at two pharmacies.</p></div>
-</div>
 
 <section class="split" id="privacy">
   <div>
@@ -67,6 +116,14 @@
   </ul>
 </section>
 
+<section class="faq" aria-labelledby="faq-h">
+  <h2 id="faq-h">Common questions</h2>
+  <details><summary><h3>Do you see my health information?</h3></summary><p>No. HerePup runs in your web browser, on your device. Your benefit guides and claims are read there and never uploaded, and HerePup has no servers that receive them. The site only counts <a href="/privacy/#usage">anonymous visits and a few steps</a>, with no cookies. You can erase everything with "Delete all my data" in the app.</p></details>
+<details><summary><h3>What do I need to get started?</h3></summary><p>Each employer's benefit guide or plan summary (a PDF is fine, even a scanned one), and last year's claims: the explanations of benefits (EOBs) or claims spreadsheet you can download from your insurer's member website under Claims, plus pharmacy claims if you fill prescriptions. A full year of claims gives the best answer. See <a href="/insurers/">insurer connections</a> for insurers that can share claims directly.</p></details>
+<details><summary><h3>Does it check whether my doctors are in network?</h3></summary><p>No. HerePup compares costs, not networks. Before you enroll, check each plan&#x27;s provider directory for the doctors, hospitals and pharmacies you use.</p></details>
+  <p class="more"><a href="/about/#faq">More questions and answers</a></p>
+</section>
+
 <section>
   <div class="note">
     <h2 style="font-size:22px">Where HerePup is today</h2>
@@ -76,8 +133,8 @@
 </main>
 
 <footer>
-  <a href="/privacy/">Privacy policy</a><a href="/terms/">Terms of use</a><a href="mailto:privacy@herepup.health">privacy@herepup.health</a>
-  <div style="margin-top:8px">&copy; 2026 HerePup</div>
+  <nav aria-label="Footer"><a href="/app/">Try it</a><a href="/how-it-works/">How it works</a><a href="/about/">About</a><a href="/about/#faq">FAQ</a><a href="/insurers/">Insurer connections</a><a href="/privacy/">Privacy policy</a><a href="/terms/">Terms of use</a><a href="mailto:chris@herepup.health">Contact</a></nav>
+  <div class="fine">&copy; 2026 HerePup. Estimates, not insurance advice.</div>
 </footer>
 </div>
 </body>

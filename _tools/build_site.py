@@ -1,0 +1,350 @@
+"""Builds herepup.health's static pages with one shared header, footer and search-engine head.
+Run from the repo root: python3 _tools/build_site.py .
+(Jekyll skips folders starting with "_", so this file is not published.)
+It reads the privacy, terms and insurers content from the last commit, so commit edits to those pages first.
+Existing page addresses are kept (/privacy/, /terms/, /insurers/ are linked from outside)."""
+import html, json, re, subprocess, sys
+from pathlib import Path
+
+ROOT = Path(sys.argv[1])
+BASE = "https://herepup.health"
+TODAY = "2026-10-18"
+E = lambda s: html.escape(s, quote=True)
+
+PLAUSIBLE = '''<!-- Privacy-friendly analytics by Plausible: anonymous visit and step counts, no cookies. Details: /privacy/#usage -->
+<script async src="https://plausible.io/js/pa-WZOZ27ZALJ2IHCY8AwOFf.js"></script>
+<script>
+  window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
+  plausible.init({outboundLinks:false,fileDownloads:false,formSubmissions:false})
+</script>'''
+
+ORG = {"@type": "Organization", "@id": BASE + "/#org", "name": "HerePup", "url": BASE + "/",
+       "logo": BASE + "/assets/icon-512.png", "email": "chris@herepup.health"}
+SITE = {"@type": "WebSite", "@id": BASE + "/#website", "url": BASE + "/", "name": "HerePup",
+        "alternateName": "HerePup | Pick yoUr Plan", "publisher": {"@id": BASE + "/#org"}}
+APP = {"@type": "WebApplication", "@id": BASE + "/app/#app", "name": "HerePup | Pick yoUr Plan", "url": BASE + "/app/",
+       "applicationCategory": "FinanceApplication", "operatingSystem": "Any (runs in a web browser)",
+       "browserRequirements": "Requires JavaScript",
+       "description": "Compares every health plan your household can enroll in, across employers, by replaying your own claims "
+                      "through each plan's premiums, deductibles, copays, coinsurance and HSA contributions. Runs in your browser; "
+                      "your files are not uploaded.",
+       "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "publisher": {"@id": BASE + "/#org"}}
+
+
+def crumbs_ld(trail):
+    return {"@type": "BreadcrumbList", "itemListElement": [
+        {"@type": "ListItem", "position": i + 1, "name": n, "item": BASE + p} for i, (n, p) in enumerate(trail)]}
+
+
+def head(title, desc, path, ld=(), robots="", og_title=None):
+    url = BASE + path
+    graph = json.dumps({"@context": "https://schema.org", "@graph": list(ld)}, ensure_ascii=False, indent=1) if ld else ""
+    return f'''<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{E(title)}</title>
+<meta name="description" content="{E(desc)}">
+{'<meta name="robots" content="' + robots + '">' if robots else '<link rel="canonical" href="' + url + '">'}
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="HerePup">
+<meta property="og:title" content="{E(og_title or title)}">
+<meta property="og:description" content="{E(desc)}">
+<meta property="og:url" content="{url}">
+<meta property="og:image" content="{BASE}/assets/herepup-social.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="HerePup's golden retriever mascot with the words: Pick the health plan that costs you least, using your own claims, privately, right in your browser.">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<meta name="theme-color" content="#F6F8F7">
+<link rel="stylesheet" href="/assets/site.css">
+{'<script type="application/ld+json">' + chr(10) + graph + chr(10) + '</script>' if graph else ''}
+{PLAUSIBLE}
+</head>'''
+
+
+LOGO = ('<a class="logo" href="/" aria-label="HerePup home"><picture><source srcset="/assets/herepup-mascot-sm.webp" type="image/webp">'
+        '<img src="/assets/herepup-mascot-sm.png" alt="" width="56" height="44"></picture><b>Here<span>Pup</span></b></a>')
+
+
+def header(active=None):
+    tab = lambda key, href, label, cls="": (f'<a href="{href}"' + (f' class="{cls}"' if cls else "")
+                                            + (' aria-current="page"' if active == key else "") + f'>{label}</a>')
+    return (f'<header class="top">\n  {LOGO}\n  <nav class="tabs" aria-label="Main">'
+            + tab("try", "/app/", "Try it", "try") + tab("how", "/how-it-works/", "How it works") + tab("about", "/about/", "About")
+            + '</nav>\n</header>')
+
+
+FOOTER = '''<footer>
+  <nav aria-label="Footer"><a href="/app/">Try it</a><a href="/how-it-works/">How it works</a><a href="/about/">About</a><a href="/about/#faq">FAQ</a><a href="/insurers/">Insurer connections</a><a href="/privacy/">Privacy policy</a><a href="/terms/">Terms of use</a><a href="mailto:chris@herepup.health">Contact</a></nav>
+  <div class="fine">&copy; 2026 HerePup. Estimates, not insurance advice.</div>
+</footer>'''
+
+
+def page(path, title, desc, body, active=None, ld=(), robots="", og_title=None, tail=""):
+    out = head(title, desc, path, ld, robots, og_title) + f'''
+<body>
+<div class="wrap">
+{header(active)}
+
+{body.strip()}
+
+{FOOTER}
+</div>
+{tail}</body>
+</html>
+'''
+    dest = ROOT / (path.strip("/") + "/index.html" if path.strip("/") else "index.html")
+    if path == "/404.html":
+        dest = ROOT / "404.html"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(out)
+    return dest
+
+
+def main_of(rel):
+    """Inner content of <main> in the last published version of a page."""
+    src = subprocess.run(["git", "-C", str(ROOT), "show", f"HEAD:{rel}"], capture_output=True, text=True, check=True).stdout
+    m = re.search(r"<main[^>]*>(.*?)</main>", src, re.S)
+    inner = re.sub(r'^\s*<p class="crumbs">.*?</p>\s*', "", m.group(1), flags=re.S)  # rebuilt below
+    return inner.strip(), src
+
+
+def crumb(label):
+    return f'<p class="crumbs"><a href="/about/">About</a> <span aria-hidden="true">›</span> {label}</p>'
+
+
+# ---------------------------------------------------------------- FAQ (shown on About; three on the home page)
+FAQ = [
+    ("Is HerePup free?",
+     "Yes. HerePup is free to use while it's in early testing, and there's no account to create."),
+    ("Do you see my health information?",
+     "No. HerePup runs in your web browser, on your device. Your benefit guides and claims are read there and never uploaded, and "
+     "HerePup has no servers that receive them. The site only counts anonymous visits and a few steps, with no cookies. You can "
+     "erase everything with \"Delete all my data\" in the app.",
+     'No. HerePup runs in your web browser, on your device. Your benefit guides and claims are read there and never uploaded, and '
+     'HerePup has no servers that receive them. The site only counts <a href="/privacy/#usage">anonymous visits and a few steps</a>, '
+     'with no cookies. You can erase everything with "Delete all my data" in the app.'),
+    ("What do I need to get started?",
+     "Each employer's benefit guide or plan summary (a PDF is fine, even a scanned one), and last year's claims: the explanations of "
+     "benefits (EOBs) or claims spreadsheet you can download from your insurer's member website under Claims, plus pharmacy claims "
+     "if you fill prescriptions. A full year of claims gives the best answer. See insurer connections for insurers that can share "
+     "claims directly.",
+     "Each employer's benefit guide or plan summary (a PDF is fine, even a scanned one), and last year's claims: the explanations of "
+     "benefits (EOBs) or claims spreadsheet you can download from your insurer's member website under Claims, plus pharmacy claims "
+     'if you fill prescriptions. A full year of claims gives the best answer. See <a href="/insurers/">insurer connections</a> for '
+     "insurers that can share claims directly."),
+    ("Can it compare plans from two employers?",
+     "Yes. If you and a spouse or partner both have employer coverage, add both benefit guides. HerePup tests every way your household "
+     "can enroll, including splitting people across the two employers' plans."),
+    ("Does it count employer HSA contributions?",
+     "Yes. Money your employer puts into a health savings account (HSA) is subtracted from that plan's cost. You confirm the amounts for "
+     "each coverage level, can turn the offset off, and if you don't know the amount HerePup shows how the answer changes with it."),
+    ("How accurate is it?",
+     "HerePup replays each claim's allowed amount through each plan's deductibles, coinsurance, copays, prescription tiers and "
+     "out-of-pocket maximums, and checks itself against what your insurer actually charged when your files include it. It is still an "
+     "estimate: prices and plan rules change, and specialty drug tiers are not modeled yet."),
+    ("What if next year looks different?",
+     "Use the What if slider to test anywhere from no care to three times last year's care. HerePup shows the points where a "
+     "different plan would become the better choice."),
+    ("Does it check whether my doctors are in network?",
+     "No. HerePup compares costs, not networks. Before you enroll, check each plan's provider directory for the doctors, hospitals and "
+     "pharmacies you use."),
+    ("Is this insurance advice?",
+     "No. HerePup doesn't sell insurance and isn't a broker. It gives you an estimate to help you decide; your plan's official "
+     "documents decide what's covered."),
+    ("Does it work on my phone?",
+     "Yes, in any up-to-date browser. Reading long or scanned PDFs is faster on a computer."),
+]
+
+
+def faq_html(items):
+    return "\n".join(f'<details><summary><h3>{E(q)}</h3></summary><p>{rest[1] if len(rest) > 1 else E(rest[0])}</p></details>'
+                     for q, *rest in items)
+
+
+FAQ_LD = {"@type": "FAQPage", "@id": BASE + "/about/#faq", "mainEntity": [
+    {"@type": "Question", "name": q, "acceptedAnswer": {"@type": "Answer", "text": rest[0]}} for q, *rest in FAQ]}
+
+HERO_IMG = ('<picture><source srcset="/assets/herepup-mascot.webp" type="image/webp">'
+            '<img class="mascot" src="/assets/herepup-mascot.png" alt="HerePup\'s golden retriever mascot carrying a rolled-up plan" '
+            'width="760" height="601" fetchpriority="high"></picture>')
+
+# ---------------------------------------------------------------- home
+home = f'''
+<main>
+<div class="hero">
+  <div class="hero-text">
+    <span class="eyebrow">Pick yoUr Plan</span>
+    <h1>Choose your health plan with your own claims, not a guess.</h1>
+    <p class="lead">At open enrollment, HerePup runs last year's real claims through every plan your household can enroll in, whether HDHP, PPO or EPO and across every employer, and shows which choice would have cost you least once premiums, deductibles, copays and HSA money are counted.</p>
+    <p style="margin:22px 0 0"><a class="cta" href="/app/">Try HerePup in your browser</a></p>
+    <p class="cta-note">Drag in your benefit guides and claims. They're read on your device and never uploaded.</p>
+  </div>
+  {HERO_IMG}
+</div>
+
+<section id="how" class="tight">
+  <h2>How it works</h2>
+  <div class="grid4" style="margin:14px 0 18px">
+    <div class="card"><div class="num">1</div><h3>Add your plan options</h3><p>Drag in each employer's benefit guide, typed or scanned. HerePup reads the plan options, premiums, deductibles and copays, and you confirm every number.</p></div>
+    <div class="card"><div class="num">2</div><h3>Bring in your claims</h3><p>Drag in your explanations of benefits and the claim or pharmacy summaries you can download from your insurer's website.</p></div>
+    <div class="card"><div class="num">3</div><h3>See what each plan would cost</h3><p>Each claim is replayed through every plan, so you see which would have charged a copay and which the full deductible. See month by month when the costs would land and how much to set aside, then test heavier or lighter years.</p></div>
+    <div class="card"><div class="num">4</div><h3>Spend less on the same care</h3><p>See where your money went, and where the same kind of care cost less: one urgent care against another, the same test at two labs, the same drug at two pharmacies.</p></div>
+  </div>
+  <a class="video-teaser" href="/how-it-works/#watch">
+    <img src="/assets/herepup-walkthrough-poster.jpg" alt="" width="1920" height="1080" loading="lazy">
+    <span><b>Watch the 2-minute walkthrough</b><br>See a sample household go from benefit guides to an answer, step by step.</span>
+  </a>
+</section>
+
+<section class="split" id="privacy">
+  <div>
+    <h2>Your health data stays with you</h2>
+    <p style="color:var(--ink)">HerePup runs on your own device, right in your browser. Your documents are read there and never uploaded. We don't have servers that receive them.</p>
+  </div>
+  <ul class="checks">
+    <li>No HerePup account, and we never see your carrier password</li>
+    <li>Carrier access is read-only and only with your approval</li>
+    <li>Nothing is sold, shared or used for advertising</li>
+    <li>Disconnect or delete everything at any time</li>
+  </ul>
+</section>
+
+<section class="faq" aria-labelledby="faq-h">
+  <h2 id="faq-h">Common questions</h2>
+  {faq_html([FAQ[1], FAQ[2], FAQ[7]])}
+  <p class="more"><a href="/about/#faq">More questions and answers</a></p>
+</section>
+
+<section>
+  <div class="note">
+    <h2 style="font-size:22px">Where HerePup is today</h2>
+    <p style="margin:0;color:var(--ink)">HerePup is in early testing, and you can <a href="/app/">try it now</a> with your own documents. Its estimates come from your own documents and are not a guarantee of cost or a substitute for your plan's documents. Questions or partnership inquiries: <a href="mailto:chris@herepup.health">chris@herepup.health</a>.</p>
+  </div>
+</section>
+</main>'''
+page("/", "Compare Health Plans With Your Own Claims | HerePup",
+     "Pick the health plan that costs you least. HerePup replays your own claims through every HDHP, PPO and EPO option you can choose, privately in your browser.",
+     home, None, [ORG, SITE, APP], og_title="HerePup: compare health plans with your own claims")
+
+# ---------------------------------------------------------------- how it works
+how = '''
+<main class="page">
+<h1>How HerePup compares your health plan options</h1>
+<p class="lead">Open enrollment asks you to guess next year's medical costs. HerePup starts from what you actually spent: it takes last year's claims and works out what each plan you can choose would have charged, claim by claim.</p>
+
+<section id="watch" class="tight">
+  <h2>Watch the walkthrough <span class="muted">(2 minutes)</span></h2>
+  <video controls playsinline preload="none" poster="/assets/herepup-walkthrough-poster.jpg" width="1920" height="1080">
+    <source src="/assets/herepup-walkthrough.mp4" type="video/mp4">
+    <track kind="captions" src="/assets/herepup-walkthrough.en.vtt" srclang="en" label="English">
+    Your browser can't play this video. <a href="/assets/herepup-walkthrough.mp4">Download it</a> instead.
+  </video>
+  <p class="muted small">Shown with a made-up household and sample documents. Captions are available.</p>
+</section>
+
+<section aria-labelledby="steps-h">
+<h2 id="steps-h">Step by step</h2>
+<ol class="steps">
+  <li><h3>Tell HerePup who's covered</h3><p>Add each person in your household and whether they're an adult or a child. HerePup uses this to pick the right coverage level for every option: employee only, employee plus spouse, employee plus children, or family.</p></li>
+  <li><h3>Add your plan options</h3><p>Drag in each employer's benefit guide or plan summary. Typed and scanned PDFs both work. HerePup reads the premiums for each coverage level, deductibles, out-of-pocket maximums, coinsurance, office, specialist, urgent care and ER copays, prescription tiers and employer HSA contributions. You check and confirm every number. If you and a spouse or partner have different employers, add both.</p></li>
+  <li><h3>Bring in last year's claims</h3><p>Drag in your explanations of benefits (EOBs), the claims spreadsheet from your insurer's member website, and your pharmacy claims. HerePup works out what kind of care each claim was, such as an office visit, a specialist, urgent care, the ER, a procedure or a prescription, and asks you to confirm anything it isn't sure about. Some insurers can also <a href="/insurers/">share claims directly</a>.</p></li>
+  <li><h3>See what every option would cost</h3><p>Each claim is replayed through every plan and every way your household could enroll. You see which plan would have charged a flat copay and which the full deductible, when coinsurance and out-of-pocket maximums kick in, and the total: premiums plus your share of care, minus employer HSA money. When your files include what your insurer actually charged, HerePup checks its own math against it.</p></li>
+  <li><h3>See it month by month</h3><p>A low-deductible plan spreads its cost evenly through premiums; a high-deductible plan costs less up front but can bring big bills in the months you need care. The month-by-month view shows when each plan's costs would land, and how much to set aside for the expensive months.</p></li>
+  <li><h3>Spend less on the same care</h3><p>HerePup also looks across your claims for the same kind of care at different providers, such as two urgent care centers, the same test at two labs or the same drug at two pharmacies, and shows what you'd have saved at the lower-cost one.</p></li>
+</ol>
+</section>
+
+<section aria-labelledby="hdhp-h">
+<h2 id="hdhp-h">HDHP or PPO? Why your own claims matter</h2>
+<p>Plans trade premiums against what you pay when you get care. A high-deductible health plan (HDHP) usually has the lowest premiums and often comes with employer HSA money, but you pay the full price of most care until the deductible is met. A PPO or EPO with a low deductible costs more every paycheck, but many visits cost only a flat copay.</p>
+<p>Which one costs less depends on how your household uses care: how many visits, what kind, how many prescriptions, and whether one person or everyone meets the deductible. Averages and plan comparison charts can't tell you that. Your claims can, and they also show whether a heavier or lighter year would change the answer.</p>
+</section>
+
+<section aria-labelledby="need-h">
+<h2 id="need-h">What you'll need</h2>
+<ul class="checks">
+  <li>The benefit guide or plan summary from each employer offering you coverage</li>
+  <li>Last year's claims from your insurer's member website (EOB PDFs or a claims spreadsheet)</li>
+  <li>Pharmacy claims, if you fill prescriptions</li>
+  <li>About 10 minutes. Nothing is uploaded, and there's no account to create</li>
+</ul>
+</section>
+
+<section aria-labelledby="limits-h">
+<h2 id="limits-h">What HerePup doesn't do yet</h2>
+<p>HerePup compares costs, not provider networks, so check that your doctors are in each plan's network. It doesn't model specialty drug tiers yet, and its results are estimates, not a promise of what a plan will cost. <a href="/about/#faq">See the FAQ</a> for more.</p>
+</section>
+
+<p style="margin:8px 0 0"><a class="cta" href="/app/">Try HerePup in your browser</a></p>
+</main>'''
+VIDEO = {"@type": "VideoObject", "@id": BASE + "/how-it-works/#video", "name": "How HerePup compares your health plan options",
+         "description": "A two-minute walkthrough of HerePup with a sample household: adding benefit guides and claims, then seeing what each plan would cost.",
+         "thumbnailUrl": [BASE + "/assets/herepup-walkthrough-poster.jpg"], "uploadDate": "2026-10-16T22:14:36-04:00",
+         "duration": "PT1M58S", "contentUrl": BASE + "/assets/herepup-walkthrough.mp4", "publisher": {"@id": BASE + "/#org"}}
+page("/how-it-works/", "How It Works: Compare HDHP, PPO and EPO Plans | HerePup",
+     "How HerePup replays last year's claims through every health plan option, shows copay vs deductible claim by claim, month-by-month costs and money to set aside.",
+     how, "how", [ORG, VIDEO])
+
+# ---------------------------------------------------------------- about
+about = f'''
+<main class="page">
+<h1>About HerePup</h1>
+<p class="lead">Every year at open enrollment, households pick a health plan by guessing. HerePup | Pick yoUr Plan replaces the guess with your own claims: it shows what each plan you can choose would really have cost you, and when.</p>
+<p>HerePup is a small, independent company. It isn't an insurer or a broker, and it doesn't sell insurance or your information. It's built to run on your own device, so your health information stays with you. HerePup is in early testing, and we'd love to hear how it works for you: <a href="mailto:chris@herepup.health">chris@herepup.health</a>.</p>
+
+<section class="faq" id="faq" aria-labelledby="faq-h">
+  <h2 id="faq-h">Frequently asked questions</h2>
+  {faq_html(FAQ)}
+</section>
+
+<section aria-labelledby="more-h">
+  <h2 id="more-h">More about HerePup</h2>
+  <div class="grid3 hub">
+    <a class="card" href="/insurers/"><h3>Insurer connections</h3><p>Which insurers can share your claims with apps like HerePup, and how to get your claims today.</p></a>
+    <a class="card" href="/privacy/"><h3>Privacy policy</h3><p>What HerePup reads, where it's stored, what's counted, and how to delete it.</p></a>
+    <a class="card" href="/terms/"><h3>Terms of use</h3><p>What HerePup is, what its estimates mean, and your responsibilities.</p></a>
+    <a class="card" href="mailto:chris@herepup.health"><h3>Contact</h3><p>Questions, feedback or partnership inquiries: chris@herepup.health</p></a>
+  </div>
+</section>
+</main>'''
+page("/about/", "About HerePup and FAQ | HerePup",
+     "What HerePup is, who it's for, and answers to common questions: is it free, is my health data private, what do I need, how accurate is it.",
+     about, "about", [ORG, {"@type": "AboutPage", "@id": BASE + "/about/", "url": BASE + "/about/", "name": "About HerePup", "about": {"@id": BASE + "/#org"}},
+                      FAQ_LD])
+
+# ---------------------------------------------------------------- existing pages, same content, new shell
+ins, _ = main_of("insurers/index.html")
+page("/insurers/", "Insurer Claims Connections (Patient Access APIs) | HerePup",
+     "Which health insurers let you share claims with apps like HerePup through a Patient Access API, who each covers, and how to download your claims today.",
+     f'<main class="doc" style="max-width:980px">\n{crumb("Insurer connections")}\n{ins}\n</main>', "about",
+     [ORG, crumbs_ld([("Home", "/"), ("About", "/about/"), ("Insurer connections", "/insurers/")])])
+
+prv, prv_src = main_of("privacy/index.html")
+tail = re.search(r"</footer>\s*</div>\s*(<script>.*?</script>)", prv_src, re.S).group(1) + "\n"
+page("/privacy/", "Privacy Policy | HerePup",
+     "How HerePup handles your information: documents and claims stay on your device, nothing is sold, anonymous usage counts only, and how to delete your data.",
+     f'<main class="doc">\n{crumb("Privacy policy")}\n{prv}\n</main>', "about",
+     [ORG, crumbs_ld([("Home", "/"), ("About", "/about/"), ("Privacy policy", "/privacy/")])], tail=tail)
+
+trm, _ = main_of("terms/index.html")
+page("/terms/", "Terms of Use | HerePup",
+     "The terms for using HerePup: what it is, why its results are estimates and not insurance advice, and your responsibilities.",
+     f'<main class="doc">\n{crumb("Terms of use")}\n{trm}\n</main>', "about",
+     [ORG, crumbs_ld([("Home", "/"), ("About", "/about/"), ("Terms of use", "/terms/")])])
+
+page("/404.html", "Page not found | HerePup", "That page doesn't exist on herepup.health.",
+     '<main class="doc"><h1>Page not found</h1><p>That page doesn\'t exist. Try <a href="/app/">HerePup in your browser</a>, see <a href="/how-it-works/">how it works</a>, or go to the <a href="/">home page</a>.</p></main>',
+     None, robots="noindex")
+
+# ---------------------------------------------------------------- sitemap + robots
+urls = [("/", "1.0"), ("/app/", "0.9"), ("/how-it-works/", "0.9"), ("/about/", "0.8"), ("/insurers/", "0.6"), ("/privacy/", "0.4"), ("/terms/", "0.3")]
+(ROOT / "sitemap.xml").write_text('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+                                  + "".join(f"  <url><loc>{BASE}{u}</loc><lastmod>{TODAY}</lastmod><priority>{p}</priority></url>\n" for u, p in urls)
+                                  + "</urlset>\n")
+(ROOT / "robots.txt").write_text(f"User-agent: *\nAllow: /\n\nSitemap: {BASE}/sitemap.xml\n")
+print("built")
