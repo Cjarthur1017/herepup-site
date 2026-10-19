@@ -187,7 +187,7 @@ function stepPlans() {
   const emps = S.employers.map((e, ei) => `<section class="card" style="background:#F8FBFB"><div class="row"><label>Employer name<input ${bind(`${ei}.name`, "employers")} value="${esc(e.name)}"></label>
     <label>Who works there?<select ${bind(`${ei}.subscriber`, "employers")}><option value="">Choose...</option>${memberOpts(e.subscriber)}</select></label>
     <button class="btn small danger" data-act="rm-employer" data-e="${ei}">Remove employer</button></div>
-    ${dropZone(`plan:${ei}`, `Drop ${e.name || "this employer"}'s benefit guide here`, "PDF, typed or scanned. HerePup adds every plan option it finds to this employer.", true)}
+    ${dropZone(`plan:${ei}`, `Drop ${e.name || "this employer"}'s benefit guide here and we'll fetch the details`, "PDF, typed or scanned. HerePup adds every plan option it finds to this employer.", true)}
     ${e.plans.map((p, pi) => planCard(e, ei, p, pi)).join("")}
     <button class="btn" data-act="add-plan" data-e="${ei}">Add a plan option for ${esc(e.name || "this employer")}</button></section>`).join("");
   const cur = S.employers.flatMap((e, ei) => e.plans.map((p, pi) => `<option value="${e.id}:${pi}" ${S.currentPlan === `${e.id}:${pi}` ? "selected" : ""}>${esc(e.name)}: ${esc(p.name)}</option>`)).join("");
@@ -203,7 +203,7 @@ function stepPlans() {
     <label>Who works there?<select id="det-sub-${di}" data-det="${di}" data-det-field="sub"><option value="">Choose...</option>${memberOpts(d.sub || "")}</select></label>
     <button class="btn primary" data-act="add-detected" data-i="${di}">Add this employer with these plans</button><button class="btn" data-act="clear-detected" data-i="${di}">Dismiss</button></div>
     <p class="muted">You can edit every number after adding it. Flags under each plan list what to double-check.</p>` : `<div class="row"><button class="btn" data-act="clear-detected" data-i="${di}">Dismiss</button></div>`}</div>`).join("");
-  const uploadCard = dropZone("plan", "Drop benefit guides here", "PDF guides from each employer, typed or scanned. Drop several at once. HerePup finds every plan option in each one.") + found;
+  const uploadCard = dropZone("plan", "Drop your benefit guides here and we'll fetch the details", "PDF guides from each employer, typed or scanned. Drop several at once. HerePup finds every plan option in each one.") + found;
   return `<h1>What plans can your household choose from?</h1><p class="lead">Drop in each employer's benefit guide. We read out the plan options, you confirm them.</p><!--MSG-->${uploadCard}${emps}
   <div class="row"><button class="btn" data-act="add-employer">Add an employer by hand</button></div>
   <div class="card"><label>Which plan were your uploaded claims actually processed under? (used to check how well we match your carrier)<select data-act="current-plan"><option value="">Not sure / skip</option>${cur}</select></label></div>
@@ -252,7 +252,7 @@ function reviewTable() {
 
 function stepClaims() {
   return `<h1>Add your claims</h1><p class="lead">Drop in your explanations of benefits (EOBs) and claim summaries. The last 12 months is the best starting point. We read them on this device, and you check every row.</p><!--MSG-->
-  <div class="grid2">${dropZone("claims", "Drop your claims here", "EOB PDFs, claim or pharmacy summaries (CSV or Excel), or a FHIR export from your insurer. Drop several at once; they're combined into one review.")}
+  <div class="grid2">${dropZone("claims", "Drop your claims here and we'll fetch the details", "EOB PDFs, claim or pharmacy summaries (CSV or Excel), or a FHIR export from your insurer. Drop several at once; they're combined into one review.")}
   ${insurerCard()}</div>
   ${reviewTable()}
   <div class="row"><button class="btn" data-go="1">Back</button><button class="btn primary" data-act="to-answer">See my answer</button></div>`;
@@ -272,14 +272,59 @@ function insurerCard() {
     <p class="muted">${S.saved.claims} claim(s) already saved in this browser.</p></div>`;
 }
 
+// The drop zone's fetching dog: idle (tail wagging), fetching (walks off with the plan while a progress bar and
+// paw prints show it working), done (runs back with a checkmark). Phase timing survives re-renders via --since.
+const FETCH = { WALK: 1600, HOLD: 6500 };
+const PAW = '<svg viewBox="0 0 24 24"><ellipse cx="12" cy="15.6" rx="5" ry="4.3"/><ellipse cx="5.6" cy="9.6" rx="2.1" ry="2.7"/><ellipse cx="9.8" cy="5.6" rx="2.1" ry="2.7"/><ellipse cx="14.2" cy="5.6" rx="2.1" ry="2.7"/><ellipse cx="18.4" cy="9.6" rx="2.1" ry="2.7"/></svg>';
+const PAWS = Array.from({ length: 10 }, (_, i) => `<i style="--i:${i};--y:${i % 2 ? 10 : 0}">${PAW}</i>`).join("");
+function fetchOf(kind) { return S.fetch && S.fetch.zone === kind ? S.fetch : null; }
 function dropZone(kind, title, help, compact = false) {
-  const busy = S.busy && S.busyKind === kind;
-  return `<div class="card drop ${compact ? "compact" : ""} ${S.drag === kind ? "over" : ""} ${busy ? "busy" : ""}" data-drop="${kind}">
+  const f = fetchOf(kind), phase = f ? f.phase : "idle";
+  const since = f ? Math.max(0, (Date.now() - (phase === "fetching" ? f.t0 : f.t1)) / 1000) : 0;
+  const pct = f && f.frac != null ? Math.round(f.frac * 100) : null;
+  return `<div class="card drop ${compact ? "compact" : ""} ${S.drag === kind ? "over" : ""} ${phase === "fetching" ? "busy" : ""}" data-drop="${kind}" data-phase="${phase}" style="--since:-${since.toFixed(2)}s">
     <label class="drop-inner"><input type="file" multiple accept="${kind.startsWith("plan") ? ".pdf,.txt" : ".pdf,.csv,.xlsx,.json"}" data-act="drop-pick" data-kind="${kind}" class="sr-only">
-      <span class="drop-icon" aria-hidden="true"></span><b>${esc(title)}</b><span class="muted">${esc(help)}</span>
-      <span class="btn small as-btn">Or choose files</span></label>
-    ${busy ? `<p class="muted" role="status" aria-live="polite">${esc(S.busy)}</p>` : ""}
+      <span class="fetch" aria-hidden="true"><span class="paws">${PAWS}</span>
+        <span class="dog"><span class="gait"><img class="tail" src="/app/img/dog-tail.webp" alt="" width="300" height="237"><img class="body" src="/app/img/dog-body.webp" alt="" width="300" height="237"></span><span class="badge"></span></span></span>
+      <span class="say say-idle"><b>${esc(title)}</b><span class="muted">${esc(help)}</span><span class="btn small as-btn">Or choose files</span></span>
+      <span class="say say-over"><b>Let go, and we'll fetch it!</b></span>
+      <span class="say say-fetching"><b>Sniffing through the details...</b>
+        <span class="bar ${pct == null ? "ind" : ""}"><i style="width:${pct ?? 0}%"></i></span>
+        <span class="muted fetch-status" role="status" aria-live="polite">${esc(f && f.phase === "fetching" ? S.busy : "")}</span></span>
+      <span class="say say-done"><b><span class="tick" aria-hidden="true"></span>Retrieved successfully!</b><span class="muted fetch-summary" role="status">${esc(f ? f.summary || "" : "")}</span></span>
+      <span class="say say-error"><b>We couldn't fetch the details</b><span class="muted fetch-summary" role="status">${esc(f ? f.summary || "" : "")}</span></span></label>
     <p class="muted local-line">Read on this device. Nothing is uploaded.</p></div>`;
+}
+// Repaint one drop zone in place (no full render, so nothing the person is typing loses focus).
+function paintFetch(kind) {
+  const el = document.querySelector(`[data-drop="${kind}"]`); if (!el) return;
+  const f = fetchOf(kind), phase = f ? f.phase : "idle";
+  el.dataset.phase = phase; el.style.setProperty("--since", "0s"); el.classList.toggle("busy", phase === "fetching");
+  el.querySelectorAll(".fetch-summary").forEach((s) => { s.textContent = f ? f.summary || "" : ""; });
+}
+function fetchStart(kind) {
+  clearTimeout(S.fetchTimer);
+  const prev = S.fetch; S.fetch = { zone: kind, phase: "fetching", t0: Date.now(), frac: null, summary: "" };
+  if (prev && prev.zone !== kind) paintFetch(prev.zone);
+  paintFetch(kind); fetchProgress(kind, null, "");
+}
+function fetchProgress(kind, frac, text) {
+  const f = fetchOf(kind); if (!f) return;
+  if (frac != null) f.frac = Math.max(f.frac || 0, Math.min(1, frac));
+  const el = document.querySelector(`[data-drop="${kind}"]`); if (!el) return;
+  const bar = el.querySelector(".bar"), st = el.querySelector(".fetch-status");
+  if (bar) { bar.classList.toggle("ind", f.frac == null); bar.querySelector("i").style.width = `${Math.round((f.frac || 0) * 100)}%`; }
+  if (st && text != null) st.textContent = text;
+}
+function fetchEnd(kind, ok, summary) {
+  const f = fetchOf(kind); if (!f) return;
+  clearTimeout(S.fetchTimer);
+  // let the dog finish walking off before it comes back, even when reading was instant
+  S.fetchTimer = setTimeout(() => {
+    if (S.fetch !== f) return;
+    f.phase = ok ? "done" : "error"; f.t1 = Date.now(); f.summary = summary; f.frac = 1; paintFetch(kind);
+    S.fetchTimer = setTimeout(() => { if (S.fetch === f) { S.fetch = null; paintFetch(kind); } }, FETCH.HOLD);
+  }, Math.max(0, FETCH.WALK - (Date.now() - f.t0)));
 }
 
 function stepAnswer() {
@@ -525,20 +570,36 @@ async function uploadClaims(file, kind, order) {
   await handleFiles([file], "claims", order ? order.split(",").map((x) => x.trim()) : null);
 }
 
-function setBusy(kind, text) { S.busy = text; S.busyKind = kind; const el = document.querySelector(`[data-drop="${kind}"] [role=status]`); if (el && text) el.textContent = text; else render(); }
+function setBusy(kind, text, frac = null) {
+  S.busy = text; S.busyKind = kind;
+  if (!text) return;
+  if (!fetchOf(kind)) fetchStart(kind);
+  fetchProgress(kind, frac, text);
+}
 
 async function handleFiles(files, zone, order = null) {
+  try { return await readFiles(files, zone, order); }
+  catch (e) { const f = fetchOf(zone); if (f && f.phase === "fetching") fetchEnd(zone, false, "See the note at the top of the page, then try again."); throw e; }
+}
+async function readFiles(files, zone, order) {
   files = [...files];
   if (!files.length) return;
   S.err = ""; S.msg = "";
   const step = zone.startsWith("plan") ? 1 : 2;
   const results = [], errors = [];
+  let found = 0;
   for (const [i, f] of files.entries()) {
     const label = files.length > 1 ? `Reading ${f.name} (${i + 1} of ${files.length})...` : `Reading ${f.name}...`;
-    setBusy(zone, label);
+    if (i === 0) fetchStart(zone);
+    setBusy(zone, label, files.length > 1 ? i / files.length : null);
     try {
       const kind = kindFor(f, step);
-      const r = await upload(f, kind, order, (p) => setBusy(zone, `${f.name}: ${p}`));
+      const r = await upload(f, kind, order, (p) => {
+        // a real progress bar only when there are enough steps to make it move; otherwise it shimmers
+        const m = /page (\d+) of (\d+)/i.exec(p), steps = m ? +m[2] * files.length : files.length;
+        setBusy(zone, `${f.name}: ${p}`, m && steps >= 3 ? (i + (+m[1] - 0.5) / +m[2]) / files.length : files.length > 1 ? i / files.length : null);
+      });
+      if (kind === "plan") found += ((r.detected || {}).plans || []).length;
       if (kind === "plan" && zone.startsWith("plan:")) addGuideTo(+zone.split(":")[1], r, f.name);
       else if (kind === "plan") {
         S.detected.push({ ...r.detected, message: r.message, file: f.name });
@@ -553,6 +614,12 @@ async function handleFiles(files, zone, order = null) {
     S.review = merged; S.preview = null; await runPreview();
   }
   if (errors.length) S.err = errors.join(" ");
+  const what = files.length === 1 ? files[0].name : `${files.length} files`;
+  const ok = errors.length < files.length;
+  const summary = !ok ? "See the note at the top of the page, then try again."
+    : step === 1 ? (found ? `Found ${found} plan option${found === 1 ? "" : "s"} in ${what}.` : `Read ${what}, but no plan table was found. See the notes below.`)
+    : `Read ${S.review ? S.review.rows.length : 0} claim row${S.review && S.review.rows.length === 1 ? "" : "s"} from ${what}. Check them below.`;
+  fetchEnd(zone, ok, summary);
   render();
 }
 

@@ -191,3 +191,63 @@ label.pref{align-items:flex-start;padding:8px 0}label.pref input{margin-top:4px}
 .hp-close{font:inherit;font-weight:700;font-size:14px;background:#fff;border:2px solid #0B2D50;color:#0B2D50;border-radius:8px;padding:6px 12px;min-height:36px;cursor:pointer}
 .req-btn{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:14px;font-weight:700;color:#036A71;background:#E4F1F0;border:1px solid transparent;border-radius:999px;padding:6px 12px;min-height:36px;cursor:pointer;white-space:nowrap}
 .req-btn:hover{border-color:#036A71}.req-btn svg{width:16px;height:16px;flex:none}
+/* the fetching dog in each drop zone */
+.drop-inner{gap:4px;padding-top:14px}
+.fetch{position:relative;display:block;width:100%;height:132px;overflow:hidden;margin-bottom:2px}
+.drop.compact .fetch{height:98px}
+.fetch .dog{position:absolute;left:50%;bottom:4px;width:150px;margin-left:-75px}
+.drop.compact .fetch .dog{width:112px;margin-left:-56px}
+.fetch .gait{position:relative;display:block;width:100%;aspect-ratio:300/237;transform-origin:50% 100%}
+.fetch .gait img{position:absolute;inset:0;width:100%;height:100%}
+.fetch .tail{transform-origin:18.4% 50.7%}
+.fetch .badge{position:absolute;right:-8px;top:-4px;width:34px;height:34px;border-radius:50%;background:var(--teal);box-shadow:0 0 0 3px #fff;transform:scale(0);opacity:0}
+.fetch .badge:after{content:"";position:absolute;left:11px;top:8px;width:9px;height:15px;border:solid #fff;border-width:0 4px 4px 0;transform:rotate(45deg)}
+.drop[data-phase=error] .fetch .badge{background:#B4561A}
+.drop[data-phase=error] .fetch .badge:after{left:15px;top:6px;width:4px;height:13px;border:0;background:#fff;border-radius:2px;transform:none;box-shadow:0 17px 0 -0px #fff}
+.fetch .paws{position:absolute;left:0;right:0;bottom:0;height:34px;display:block}
+.fetch .paws i{position:absolute;left:calc(4% + var(--i) * 9.6%);bottom:calc(2px + var(--y) * 1px);width:22px;height:22px;opacity:0;transform:rotate(90deg)}
+.fetch .paws svg{display:block;width:100%;height:100%;fill:#8A5A2B;opacity:.5}
+.say{display:none;flex-direction:column;align-items:center;gap:6px;width:100%}
+.drop[data-phase=idle] .say-idle,.drop[data-phase=fetching] .say-fetching,.drop[data-phase=done] .say-done,.drop[data-phase=error] .say-error{display:flex}
+.drop.over[data-phase=idle] .say-idle{display:none}.drop.over[data-phase=idle] .say-over{display:flex}
+.drop[data-phase=fetching] .drop-inner{cursor:progress}
+.say b{font-size:22px}.drop.compact .say b{font-size:18px}
+.say-done b,.say-error b{display:inline-flex;align-items:center;gap:8px}
+.say .tick{display:inline-block;width:22px;height:22px;border-radius:50%;background:var(--teal);position:relative;flex:none}
+.say .tick:after{content:"";position:absolute;left:7px;top:4px;width:6px;height:11px;border:solid #fff;border-width:0 3px 3px 0;transform:rotate(45deg)}
+.bar{display:block;width:min(340px,86%);height:10px;border-radius:5px;background:#DCE9E8;overflow:hidden;margin:4px 0}
+.bar i{display:block;height:100%;border-radius:5px;background:var(--teal) linear-gradient(90deg,rgba(255,255,255,0) 0,rgba(255,255,255,.35) 50%,rgba(255,255,255,0) 100%) no-repeat;background-size:60% 100%;animation:fetch-shine 1.4s linear infinite;transition:width .35s ease}
+@keyframes fetch-shine{from{background-position:-120% 0}to{background-position:220% 0}}
+.bar.ind i{width:34% !important;animation:fetch-ind 1.3s ease-in-out infinite}
+.drop .fetch-status{font-weight:600;color:var(--teal);font-size:15px;min-height:1.4em}
+/* idle: tail wags, a little breathing; dragging over: excited */
+.drop[data-phase=idle] .tail{animation:fetch-wag .34s ease-in-out infinite alternate}
+.drop[data-phase=idle] .gait{animation:fetch-breathe 2.6s ease-in-out infinite}
+.drop.over[data-phase=idle] .tail{animation-duration:.16s}
+.drop.over[data-phase=idle] .gait{animation:fetch-hop .5s ease-out infinite}
+/* fetching: walks off with the plan, then paw prints keep sniffing across */
+.drop[data-phase=fetching] .dog{animation:fetch-walkoff 1.6s cubic-bezier(.5,0,.75,.4) var(--since) both}
+.drop[data-phase=fetching] .gait{animation:fetch-gait .36s linear var(--since) 5}
+.drop[data-phase=fetching] .tail{animation:fetch-wag .5s ease-in-out infinite alternate}
+.drop[data-phase=fetching] .paws i{animation:fetch-paw 2.6s ease-in-out infinite;animation-delay:calc(var(--i) * .2s + .9s)}
+/* done: runs back in, checkmark pops */
+.drop[data-phase=done] .dog,.drop[data-phase=error] .dog{animation:fetch-runin .9s cubic-bezier(.15,.75,.35,1) var(--since) both}
+.drop[data-phase=done] .gait,.drop[data-phase=error] .gait{animation:fetch-gait .2s linear var(--since) 4}
+.drop[data-phase=done] .tail{animation:fetch-wag .18s ease-in-out infinite alternate}
+.drop[data-phase=done] .badge,.drop[data-phase=error] .badge{animation:fetch-pop .45s cubic-bezier(.3,1.6,.5,1) calc(var(--since) + .8s) both}
+@keyframes fetch-wag{from{transform:rotate(-11deg)}to{transform:rotate(13deg)}}
+@keyframes fetch-breathe{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px) scaleY(1.01)}}
+@keyframes fetch-hop{0%,100%{transform:translateY(0)}40%{transform:translateY(-9px)}}
+@keyframes fetch-gait{0%,50%,100%{transform:translateY(0) rotate(0)}25%{transform:translateY(-5px) rotate(-1.5deg)}75%{transform:translateY(-5px) rotate(1.5deg)}}
+@keyframes fetch-walkoff{0%{left:50%}100%{left:calc(100% + 110px)}}
+@keyframes fetch-runin{0%{left:-110px}100%{left:50%}}
+@keyframes fetch-paw{0%,100%{opacity:0}12%{opacity:1}55%{opacity:.9}80%{opacity:0}}
+@keyframes fetch-pop{0%{transform:scale(0);opacity:0}100%{transform:scale(1);opacity:1}}
+@keyframes fetch-ind{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}
+@media (prefers-reduced-motion:reduce){
+  .drop .fetch .dog,.drop .fetch .gait,.drop .fetch .tail{animation:none !important}
+  .drop[data-phase=fetching] .fetch .dog{opacity:.35}
+  .drop .fetch .paws i{animation:none !important;opacity:.6}
+  .drop[data-phase=done] .badge,.drop[data-phase=error] .badge{animation:none !important;transform:scale(1);opacity:1}
+  .bar.ind i{animation:none !important;width:100% !important;opacity:.5}
+}
