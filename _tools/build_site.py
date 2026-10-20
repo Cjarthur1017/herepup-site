@@ -36,7 +36,7 @@ def crumbs_ld(trail):
         {"@type": "ListItem", "position": i + 1, "name": n, "item": BASE + p} for i, (n, p) in enumerate(trail)]}
 
 
-def head(title, desc, path, ld=(), robots="", og_title=None):
+def head(title, desc, path, ld=(), robots="", og_title=None, analytics=True, extra=""):
     url = BASE + path
     graph = json.dumps({"@context": "https://schema.org", "@graph": list(ld)}, ensure_ascii=False, indent=1) if ld else ""
     return f'''<!doctype html>
@@ -62,7 +62,7 @@ def head(title, desc, path, ld=(), robots="", og_title=None):
 <meta name="theme-color" content="#F6F8F7">
 <link rel="stylesheet" href="/assets/site.css">
 {'<script type="application/ld+json">' + chr(10) + graph + chr(10) + '</script>' if graph else ''}
-{PLAUSIBLE}
+{PLAUSIBLE if analytics else extra}
 </head>'''
 
 
@@ -84,8 +84,8 @@ FOOTER = '''<footer>
 </footer>'''
 
 
-def page(path, title, desc, body, active=None, ld=(), robots="", og_title=None, tail=""):
-    out = head(title, desc, path, ld, robots, og_title) + f'''
+def page(path, title, desc, body, active=None, ld=(), robots="", og_title=None, tail="", analytics=True, extra=""):
+    out = head(title, desc, path, ld, robots, og_title, analytics, extra) + f'''
 <body>
 <div class="wrap">
 {header(active)}
@@ -385,6 +385,41 @@ page("/contact/", "Contact HerePup | HerePup",
 page("/404.html", "Page not found | HerePup", "That page doesn't exist on herepup.health.",
      '<main class="doc"><h1>Page not found</h1><p>That page doesn\'t exist. Try <a href="/app/">HerePup in your browser</a>, see <a href="/how-it-works/">how it works</a>, or go to the <a href="/">home page</a>.</p></main>',
      None, robots="noindex")
+
+# Insurer sign-in hand-off. Some insurers (Cigna) won't accept a callback on the member's own computer, so this static
+# page is the registered callback: it runs in the browser, records nothing (no analytics), and forwards the code and
+# state to the HerePup desktop app at localhost. The state names the app's scheme and port (hpl.<scheme>.<port>.<random>);
+# only localhost is ever a destination. The code is useless without the PKCE verifier kept on the member's computer.
+CALLBACK_JS = r'''<script>
+(function () {
+  var q = new URLSearchParams(location.search), state = q.get("state") || "";
+  var msg = document.getElementById("cb-msg"), help = document.getElementById("cb-help");
+  function link(href, text) { var a = document.createElement("a"); a.href = href; a.textContent = text; return a; }
+  var m = /^hpl\.(https?)\.(\d{4,5})\.[A-Za-z0-9_-]{16,}$/.exec(state), port = m ? Number(m[2]) : 0;
+  if (m && port >= 1024 && port <= 65535) {
+    var dest = m[1] + "://localhost:" + port + "/callback" + location.search;
+    help.append("Nothing happening? Make sure HerePup is running on this computer, then ", link(dest, "try again"), ".");
+    setTimeout(function () { help.hidden = false; }, 1500);
+    location.replace(dest);
+    return;
+  }
+  if (location.search) history.replaceState(null, "", location.pathname);
+  var err = q.get("error_description") || q.get("error");
+  msg.textContent = err ? "The insurer sign-in didn't finish: " + err
+                        : "This page finishes insurer sign-ins for HerePup. There's nothing to do here.";
+  help.append(link("/app/", "Go to HerePup"));
+  help.hidden = false;
+})();
+</script>
+'''
+page("/app/callback/", "Finishing your insurer sign-in | HerePup", "Hands an insurer sign-in back to HerePup on your computer.",
+     '''<main class="doc"><h1>Finishing your insurer sign-in</h1>
+<p id="cb-msg" role="status">Taking you back to HerePup on your computer...</p>
+<p id="cb-help" hidden></p>
+<noscript><p>This page needs JavaScript to hand your sign-in back to HerePup.</p></noscript>
+<p class="muted" style="margin-top:28px">This page only passes your sign-in along. HerePup doesn't record anything here, and the code in this
+link only works with a key that stays on your computer.</p></main>''',
+     None, robots="noindex", tail=CALLBACK_JS, analytics=False, extra='<meta name="referrer" content="no-referrer">')
 
 # ---------------------------------------------------------------- sitemap + robots
 urls = [("/", "1.0"), ("/app/", "0.9"), ("/how-it-works/", "0.9"), ("/about/", "0.8"), ("/insurers/", "0.6"), ("/contact/", "0.5"), ("/privacy/", "0.4"), ("/terms/", "0.3")]
