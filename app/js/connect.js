@@ -8,7 +8,7 @@
 "use strict";
 
 // HerePup's sign-in helper. Empty = the browser does the token step itself (works only where the insurer allows it).
-const HELPER_URL = "";
+const HELPER_URL = "https://herepup-signin.sweet-bread-ec98.workers.dev";
 
 export const CARRIERS = {
   aetna: {
