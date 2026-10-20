@@ -10,6 +10,7 @@ const CX_TEST = CX.testMode(); // direct insurer connections, in testing: /app/?
 const cxCheck = {};
 const STEPS = ["Household", "Plan documents", "Claims", "Your answer", "Your spending"];
 const TIERS = [["ee", "Employee only"], ["ee_sp", "Employee + spouse"], ["ee_ch", "Employee + children"], ["family", "Family"]];
+const TIER_WORDS = { ee: "employee only", ee_sp: "employee + spouse", ee_ch: "employee + children", family: "family" };
 const S = { step: 0, members: [], employers: [], currentPlan: "", saved: { claims: 0 }, review: null, hints: {}, detected: [], preview: null, settings: {}, drag: "", insurer: "", spending: null, busy: "", analysis: null, timeline: null, answerTab: "year", hsaGate: false, mult: 1, hsa: true, msg: "", err: "" };
 const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -429,7 +430,7 @@ function stepAnswer() {
   const second = a.second_gap != null ? `About ${usd(a.second_gap)} less than the next best option.` : "";
   const others = a.ranked.slice(0, 6).map((r, i) => `<tr class="${i === 0 ? "ok" : ""}"><td>${esc(r.label)}</td><td>${usd(r.premium)}</td><td>${usd(r.member_cost)}</td><td>${r.hsa_offset ? "-" + usd(r.hsa_offset) : "$0"}</td><td><b>${usd(r.total)}</b></td></tr>`).join("");
   const nameOf = (id) => (S.members.find((m) => m.id === id) || {}).name || id;
-  const who = b.detail.map((d) => `<li><b>${esc(d.employer)}: ${esc(d.plan)}</b> covers ${d.covered.map((c) => esc(nameOf(c))).join(", ")} (${esc(d.tier)})</li>`).join("");
+  const who = b.detail.map((d) => `<li><b>${esc(d.employer)}: ${esc(d.plan)}</b> covers ${d.covered.map((c) => esc(nameOf(c))).join(", ")} (${esc(TIER_WORDS[d.tier] || d.tier)})</li>`).join("");
   const bs = a.basis || { short: "your claims history", options: [] }, short = esc(bs.short);
   const flips = a.break_even.flips.length ? a.break_even.flips.map((f) => `<li>Between ${Math.round(f.between[0] * 100)}% and ${Math.round(f.between[1] * 100)}% of the care in ${short}, the best choice changes from <b>${esc(f.from)}</b> to <b>${esc(f.to)}</b>.</li>`).join("") : `<li>The same option wins at every level of care we tested, from none to three times the care in ${short}.</li>`;
   const picker = basisPicker(bs, "basis", "Which year of your history should HerePup plan around?") + (bs.options.length && bs.note ? `<p class="muted small">${esc(bs.note)}</p>` : "");
