@@ -388,13 +388,19 @@ page("/404.html", "Page not found | HerePup", "That page doesn't exist on herepu
 
 # Insurer sign-in hand-off. Some insurers (Cigna) won't accept a callback on the member's own computer, so this static
 # page is the registered callback: it runs in the browser, records nothing (no analytics), and forwards the code and
-# state to the HerePup desktop app at localhost. The state names the app's scheme and port (hpl.<scheme>.<port>.<random>);
+# state to the HerePup desktop app at localhost, or (state hpw.*) back to the web app's tab on this site. The state names the app's scheme and port (hpl.<scheme>.<port>.<random>);
 # only localhost is ever a destination. The code is useless without the PKCE verifier kept on the member's computer.
 CALLBACK_JS = r'''<script>
 (function () {
   var q = new URLSearchParams(location.search), state = q.get("state") || "";
   var msg = document.getElementById("cb-msg"), help = document.getElementById("cb-help");
   function link(href, text) { var a = document.createElement("a"); a.href = href; a.textContent = text; return a; }
+  if (/^hpw\.[A-Za-z0-9_-]{16,}$/.test(state)) {  // started in the web app on this site: hand it back to that tab
+    try { sessionStorage.setItem("herepup.connect.return", JSON.stringify({ code: q.get("code") || "", state: state,
+      error: q.get("error_description") || q.get("error") || "" })); } catch (e) { /* storage blocked: the app will say so */ }
+    location.replace("/app/");
+    return;
+  }
   var m = /^hpl\.(https?)\.(\d{4,5})\.[A-Za-z0-9_-]{16,}$/.exec(state), port = m ? Number(m[2]) : 0;
   if (m && port >= 1024 && port <= 65535) {
     var dest = m[1] + "://localhost:" + port + "/callback" + location.search;

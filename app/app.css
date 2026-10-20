@@ -251,3 +251,18 @@ label.pref{align-items:flex-start;padding:8px 0}label.pref input{margin-top:4px}
   .drop[data-phase=done] .badge,.drop[data-phase=error] .badge{animation:none !important;transform:scale(1);opacity:1}
   .bar.ind i{animation:none !important;width:100% !important;opacity:.5}
 }
+/* direct insurer connection (testing) */
+.cx{margin:14px 0 4px;padding:14px 0 2px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.cx h3{margin:0 0 4px;font-size:18px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.cx .pill{font-size:12px;font-weight:700;letter-spacing:.02em;padding:2px 9px;border-radius:999px;background:var(--orange-l);color:var(--orange)}
+.cx details{margin:10px 0}
+.cx details .row{margin-top:8px}
+.cx input[readonly]{background:var(--bg);color:var(--ink)}
+.cx-check{font-size:15px;margin:10px 0}
+.cx-check.ok{color:var(--teal)}
+.cx-check.warn{color:var(--orange);background:var(--orange-l);padding:8px 12px;border-radius:8px}
+.cx-on{font-weight:600;color:var(--navy)}
+.grid2>*{min-width:0}
+.cx select,.cx input{width:100%;min-width:0;max-width:100%}
+.cx .row>label{flex:1 1 200px;min-width:0}
+.cx-or{font-size:16px;margin:16px 0 0}

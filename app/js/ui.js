@@ -4,6 +4,9 @@ import { INSURERS } from "./insurers.js";
 import { CARE_LABEL } from "./insights.js";
 import { quickFacts } from "./timeline.js";
 import { mountTimeline } from "./timeline-view.js";
+import * as CX from "./connect.js";
+const CX_TEST = CX.testMode(); // direct insurer connections, in testing: /app/?connect=test
+const cxCheck = {};
 const STEPS = ["Household", "Plan documents", "Claims", "Your answer", "Your spending"];
 const TIERS = [["ee", "Employee only"], ["ee_sp", "Employee + spouse"], ["ee_ch", "Employee + children"], ["family", "Family"]];
 const S = { step: 0, members: [], employers: [], currentPlan: "", saved: { claims: 0 }, review: null, hints: {}, detected: [], preview: null, settings: {}, drag: "", insurer: "", spending: null, busy: "", analysis: null, timeline: null, answerTab: "year", hsaGate: false, mult: 1, hsa: true, msg: "", err: "" };
@@ -70,7 +73,10 @@ async function load() {
   else if (S.members.length) S.step = 1;
   if (S.step === 3 && !hsaDone()) { S.step = 1; S.hsaGate = true; S.msg = "Before your answer: confirm the employer HSA money for each plan."; }
   if (!storageWorks()) S.msg = "This browser is not letting HerePup save your work (private window or blocked storage). It will work, but nothing is kept after you close the tab.";
+  const ret = CX.takeReturn(); // back from an insurer sign-in (see connect.js)
+  if (ret) { S.step = 2; S.hsaGate = false; S.msg = ""; S.insurer = CX.pendingCarrier() || S.insurer; }
   render();
+  if (ret) await cxReturn(ret);
 }
 
 function render() {
@@ -268,8 +274,67 @@ function insurerCard() {
         <li>Drop the files here.</li></ol>
       ${ins.id !== "other" ? `<p class="muted"><b>Direct connection (in testing):</b> ${esc(ins.name)} publishes a Patient Access API. ${esc(ins.covers)} HerePup status: ${esc(ins.herepup)}. <a href="/insurers/">About insurer connections</a></p>` : ""}
       <p><button type="button" class="req-btn" data-request-insurer="${esc(ins.id === "other" ? "" : ins.name.replace(/\s*\(.*?\)/, ""))}" data-from="Web app, Claims step">${BELL}${ins.id === "other" ? "Request your insurer" : `Request a direct connection to ${esc(ins.name)}`}</button></p>`;
-  return `<div class="card"><h2>Get your claims from your insurer</h2><label>Your insurer<select data-act="insurer">${opts}</select></label>${body}
+  const cx = CX_TEST && ins && CX.CARRIERS[ins.id] ? connectPanel(ins.id) : "";
+  const steps = cx ? body.replace(/<p class="muted"><b>Direct connection \(in testing\):[\s\S]*$/, "") : body; // the panel replaces the status and request button
+  return `<div class="card"><h2>Get your claims from your insurer</h2><label>Your insurer<select data-act="insurer">${opts}</select></label>${cx}${cx ? `<h3 class="cx-or">Or download your claims</h3>` : ""}${steps}
     <p class="muted">${S.saved.claims} claim(s) already saved in this browser.</p></div>`;
+}
+
+// Direct connection (testing): sign in at the insurer; claims come straight into this browser.
+function cxCheckLine(cid, env) {
+  const ok = cxCheck[`${cid}:${env}`], name = CX.CARRIERS[cid].name;
+  if (ok == null) return `<p class="cx-check muted" id="cx-check">Checking whether ${esc(name)} accepts connections from this browser...</p>`;
+  return ok ? `<p class="cx-check ok" id="cx-check"><span aria-hidden="true">&#10003;</span> ${esc(name)}'s sign-in server accepts connections from this browser.</p>`
+    : `<p class="cx-check warn" id="cx-check"><b>This browser couldn't reach ${esc(name)}'s sign-in server directly.</b> ${esc(name)} may not allow browser connections (CORS), or an extension blocked it. You can still try; HerePup will say exactly where it stops.</p>`;
+}
+function connectPanel(cid) {
+  const c = CX.CARRIERS[cid], cfg = CX.settings(cid), ep = CX.endpoints(cid, cfg), tok = CX.connection(cid), key = `${cid}:${ep.env}`;
+  if (!(key in cxCheck)) {
+    cxCheck[key] = null;
+    CX.check(cid).then((ok) => { cxCheck[key] = ok; const el = document.getElementById("cx-check"); if (el && CX.endpoints(cid).env === ep.env) el.outerHTML = cxCheckLine(cid, ep.env); });
+  }
+  const envs = Object.entries(c.envs).map(([k, v]) => `<option value="${k}" ${ep.env === k ? "selected" : ""}>${esc(v.label)}</option>`).join("");
+  const mins = tok ? Math.max(1, Math.round((tok.expires_at - Date.now()) / 60000)) : 0;
+  const actions = tok
+    ? `<p class="cx-on">Connected to ${esc(c.name)} ${esc(tok.env)}${tok.patient ? ` (member record ${esc(tok.patient)})` : ""} for about ${mins} more minute${mins === 1 ? "" : "s"}.</p>
+       <div class="row"><button class="btn primary" data-act="cx-pull" data-cid="${cid}">Pull claims again</button><button class="btn" data-act="cx-connect" data-cid="${cid}">Connect another family member</button><button class="btn small" data-act="cx-disconnect" data-cid="${cid}">Disconnect</button></div>`
+    : `<div class="row"><button class="btn primary" data-act="cx-connect" data-cid="${cid}">Connect to ${esc(c.name)}</button></div>`;
+  return `<div class="cx" id="cx-panel"><h3>Connect to ${esc(c.name)} <span class="pill">Testing</span></h3>
+    <p class="muted">Sign in at ${esc(c.name)} and your claims come straight into this browser. Nothing passes through HerePup.</p>
+    <label>Which data<select data-cx="env" data-cid="${cid}">${envs}</select></label>
+    <details ${cfg.client_id ? "" : "open"}><summary><b>App settings from the ${esc(c.name)} developer portal</b></summary>
+      <div class="row"><label>Client ID<input data-cx="client_id" data-cid="${cid}" value="${esc(cfg.client_id || "")}" autocomplete="off" spellcheck="false"></label>
+        <label>Client secret<input type="password" data-cx="client_secret" data-cid="${cid}" placeholder="${cfg.client_secret ? "Saved. Leave blank to keep it" : "If the portal issued one"}" autocomplete="off"></label></div>
+      <label>Callback URL to register in the portal<input readonly value="${esc(CX.callbackUrl())}" data-select-all></label>
+      <p class="muted">Kept only in this browser. "Delete all my data" erases them.</p></details>
+    ${cxCheckLine(cid, ep.env)}
+    ${ep.hint ? `<p class="muted">${esc(ep.hint)}</p>` : ""}
+    ${actions}
+    <p class="muted">${esc(c.covers)}</p></div>`;
+}
+async function cxPull(cid) {
+  const c = CX.CARRIERS[cid];
+  setBusy("claims", `Fetching your claims from ${c.name}...`);
+  try {
+    const got = await CX.pull(cid, (t) => setBusy("claims", t));
+    if (!got.eobs) {
+      fetchEnd("claims", false, `${c.name} returned no claims for this member.`);
+      S.busy = ""; S.msg = `${c.name} signed you in but returned no claims. ${c.covers}${got.notes.length ? " " + got.notes.join(" ") : ""}`;
+      render(); return;
+    }
+    const bundle = { resourceType: "Bundle", type: "collection", entry: got.resources.map((r) => ({ resource: r })) };
+    const file = new File([JSON.stringify(bundle)], `${c.name} ${got.env} claims.json`, { type: "application/json" });
+    await handleFiles([file], "claims", null, `${c.name} (${got.env})`);
+    if (got.notes.length) { S.msg = got.notes.join(" "); render(); }
+  } catch (e) { S.busy = ""; const f = fetchOf("claims"); if (f && f.phase === "fetching") fetchEnd("claims", false, "See the note at the top of the page."); throw e; }
+}
+async function cxReturn(ret) {
+  try {
+    setBusy("claims", "Finishing the sign-in...");
+    const done = await CX.finish(ret);
+    S.insurer = done.cid;
+    await cxPull(done.cid);
+  } catch (e) { S.busy = ""; const f = fetchOf("claims"); if (f && f.phase === "fetching") fetchEnd("claims", false, "See the note at the top of the page."); S.err = e.message; render(); }
 }
 
 // The drop zone's fetching dog: idle (tail wagging), fetching (walks off with the plan while a progress bar and
@@ -560,8 +625,11 @@ document.addEventListener("click", async (ev) => {
       await saveEmployers(); S.step = 3; S.analysis = null; render();
     }
     else if (act === "wipe") {
-      if (confirm("Delete your household, plans and claims from this browser?")) { await api("/api/data", { method: "DELETE" }); location.reload(); }
+      if (confirm("Delete your household, plans and claims from this browser?")) { await api("/api/data", { method: "DELETE" }); CX.forget(); location.reload(); }
     }
+    else if (act === "cx-connect") { await CX.start(t.dataset.cid); }
+    else if (act === "cx-pull") { await cxPull(t.dataset.cid); }
+    else if (act === "cx-disconnect") { CX.disconnect(t.dataset.cid); render(); }
   } catch (e) { S.err = e.message; render(); }
 });
 
@@ -577,11 +645,11 @@ function setBusy(kind, text, frac = null) {
   fetchProgress(kind, frac, text);
 }
 
-async function handleFiles(files, zone, order = null) {
-  try { return await readFiles(files, zone, order); }
+async function handleFiles(files, zone, order = null, title = "") {
+  try { return await readFiles(files, zone, order, title); }
   catch (e) { const f = fetchOf(zone); if (f && f.phase === "fetching") fetchEnd(zone, false, "See the note at the top of the page, then try again."); throw e; }
 }
-async function readFiles(files, zone, order) {
+async function readFiles(files, zone, order, title = "") {
   files = [...files];
   if (!files.length) return;
   S.err = ""; S.msg = "";
@@ -590,7 +658,7 @@ async function readFiles(files, zone, order) {
   let found = 0;
   for (const [i, f] of files.entries()) {
     const label = files.length > 1 ? `Reading ${f.name} (${i + 1} of ${files.length})...` : `Reading ${f.name}...`;
-    if (i === 0) fetchStart(zone);
+    if (i === 0 && !(fetchOf(zone) && fetchOf(zone).phase === "fetching")) fetchStart(zone);
     setBusy(zone, label, files.length > 1 ? i / files.length : null);
     try {
       const kind = kindFor(f, step);
@@ -614,7 +682,7 @@ async function readFiles(files, zone, order) {
     S.review = merged; S.preview = null; await runPreview();
   }
   if (errors.length) S.err = errors.join(" ");
-  const what = files.length === 1 ? files[0].name : `${files.length} files`;
+  const what = title || (files.length === 1 ? files[0].name : `${files.length} files`);
   const ok = errors.length < files.length;
   const summary = !ok ? "See the note at the top of the page, then try again."
     : step === 1 ? (found ? `Found ${found} plan option${found === 1 ? "" : "s"} in ${what}.` : `Read ${what}, but no plan table was found. See the notes below.`)
@@ -627,6 +695,13 @@ document.addEventListener("change", async (ev) => {
   const t = ev.target;
   try {
     if (t.dataset.act === "insurer") { S.insurer = t.value; render(); return; }
+    if (t.dataset.cx) {
+      const v = t.value.trim(), k = t.dataset.cx;
+      if (k === "client_secret") { if (v) { CX.saveSettings(t.dataset.cid, { client_secret: v }); t.value = ""; t.placeholder = "Saved. Leave blank to keep it"; } return; }
+      CX.saveSettings(t.dataset.cid, { [k]: v });
+      if (k === "env") render();
+      return;
+    }
     if (t.dataset.gateHas !== undefined) { const box = t.closest("[data-gate]"); box.querySelector(".gate-amounts").hidden = t.value !== "yes"; return; }
     if (t.dataset.gateNone !== undefined) { t.closest("[data-gate]").querySelectorAll("[data-gate-amt]").forEach((i) => { i.disabled = t.checked; }); return; }
     if (t.dataset.act === "plan-types") {
@@ -695,5 +770,6 @@ document.addEventListener("drop", async (ev) => {
   try { await handleFiles(ev.dataTransfer.files, z.dataset.drop); } catch (e) { S.busy = ""; S.err = e.message; render(); }
 });
 
+document.addEventListener("focusin", (ev) => { if (ev.target.matches && ev.target.matches("[data-select-all]")) ev.target.select(); });
 usageNote();
 load().catch((e) => { S.err = e.message; render(); });
