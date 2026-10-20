@@ -318,7 +318,7 @@ function connectPanel(cid) {
   const envs = Object.entries(c.envs).map(([k, v]) => `<option value="${k}" ${ep.env === k ? "selected" : ""}>${esc(v.label)}</option>`).join("");
   const mins = tok ? Math.max(1, Math.round((tok.expires_at - Date.now()) / 60000)) : 0;
   const consent = `<label class="cx-consent"><input type="checkbox" data-cx-consent data-cid="${cid}" ${cfg.consent === CX.CONSENT_VERSION ? "checked" : ""}>
-    <span>I want HerePup to read my claims and coverage from ${esc(c.name)} into this browser, as described in the <a href="/privacy/#connect" target="_blank" rel="noopener">Privacy Policy</a>. I can disconnect or delete them at any time.</span></label>`;
+    <span>I want HerePup to read my claims and coverage from ${esc(c.name)} into this browser, as described in the <a href="/privacy/#connect" target="_blank" rel="noopener">Privacy Policy</a>. HerePup uses them only to estimate my plan costs on this device, and never sells or shares them. I can disconnect or delete them at any time.</span></label>`;
   const actions = tok
     ? `<p class="cx-on">Connected to ${esc(c.name)} ${esc(tok.env)}${tok.patient ? ` (member record ${esc(tok.patient)})` : ""} for about ${mins} more minute${mins === 1 ? "" : "s"}.</p>
        ${consent}<div class="row"><button class="btn primary" data-act="cx-pull" data-cid="${cid}">Pull claims again</button><button class="btn" data-act="cx-connect" data-cid="${cid}">Connect another family member</button><button class="btn small" data-act="cx-disconnect" data-cid="${cid}">Disconnect</button></div>`

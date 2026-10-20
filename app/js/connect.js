@@ -44,9 +44,9 @@ export const CARRIERS = {
     askMember: true,  // no name comes back, so the member says whose Medicare it is before connecting
     noPatient: true,  // Patient isn't readable without demographics
     // A sign-in that names no beneficiary is almost always the Blue Button developer account still signed in in this browser.
-    noPatientHint: "Medicare didn't say which beneficiary signed in. If you're signed in to the Blue Button developer site (sandbox.bluebutton.cms.gov) in this browser, sign out of it, or use a private window, then connect again and sign in with a test beneficiary.",
+    noPatientHint: "Medicare didn't say which beneficiary signed in. If you're signed in to Medicare's developer site (sandbox.bluebutton.cms.gov) in this browser, sign out of it, or use a private window, then connect again and sign in with a test beneficiary.",
     slash: true,      // Blue Button's resource paths end in "/"
-    covers: "Blue Button covers people with Original Medicare (Parts A, B and D), including Part D drug claims. Medicare Advantage plans connect through their own insurer.",
+    covers: "Covers people with Original Medicare (Parts A, B and D), including Part D drug claims. Medicare Advantage plans connect through their own insurer.",
     envs: {
       sandbox: {
         label: "Sandbox (Medicare test beneficiary, no real data)",
