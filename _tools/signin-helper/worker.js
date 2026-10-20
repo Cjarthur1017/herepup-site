@@ -1,0 +1,84 @@
+// HerePup sign-in helper (a Cloudflare Worker).
+//
+// One job: after a member signs in at their insurer, the web app sends the one-time sign-in code here. The helper
+// adds HerePup's client secret (a public website can't keep one), trades the code for an access token at the
+// insurer, and hands the insurer's answer straight back to the member's browser. It stores nothing and logs
+// nothing. Claims never pass through here: the browser fetches them from the insurer directly.
+//
+// Guard rails: it answers only pages on herepup.health, only for the callback https://herepup.health/app/callback/,
+// and only ever calls the insurer token addresses listed below. It is not a general-purpose proxy.
+//
+// Settings (Cloudflare: Workers & Pages > herepup-signin > Settings > Variables and Secrets):
+//   AETNA_SANDBOX_CLIENT_ID     Text     client ID of the Aetna sandbox app (not secret; the web app reads it from /health)
+//   AETNA_SANDBOX_SECRET        Secret   that app's client secret
+//   AETNA_PRODUCTION_CLIENT_ID  Text     later, once Aetna approves production
+//   AETNA_PRODUCTION_SECRET     Secret   later
+//   ALLOWED_ORIGINS             Text     optional, comma-separated; default https://herepup.health
+
+const TOKEN_URLS = {
+  "aetna:sandbox": "https://vteapif1.aetna.com/fhirdemo/v1/fhirserver_auth/oauth2/token",
+  "aetna:production": "https://apif1.aetna.com/fhir/v1/fhirserver_auth/oauth2/token",
+};
+const GRANTS = new Set(["authorization_code", "refresh_token"]);
+const MAX = 4096; // longest code, verifier or refresh token accepted
+
+function settingsFor(env, key) {
+  const p = key.replace(":", "_").toUpperCase(); // aetna:sandbox -> AETNA_SANDBOX
+  const id = env[p + "_CLIENT_ID"], secret = env[p + "_SECRET"];
+  return id && secret ? { id, secret, tokenUrl: env[p + "_TOKEN_URL"] || TOKEN_URLS[key] } : null;
+}
+
+export default {
+  async fetch(request, env) {
+    const origins = (env.ALLOWED_ORIGINS || "https://herepup.health").split(",").map((s) => s.trim()).filter(Boolean);
+    const origin = request.headers.get("Origin") || "";
+    const allowed = origins.includes(origin);
+    const cors = allowed ? { "Access-Control-Allow-Origin": origin, Vary: "Origin" } : { Vary: "Origin" };
+    const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { ...cors,
+      "Content-Type": "application/json", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff" } });
+    const path = new URL(request.url).pathname;
+
+    if (request.method === "OPTIONS") {
+      if (!allowed) return new Response(null, { status: 403 });
+      return new Response(null, { status: 204, headers: { ...cors, "Access-Control-Allow-Methods": "GET, POST",
+        "Access-Control-Allow-Headers": "Content-Type", "Access-Control-Max-Age": "600" } });
+    }
+
+    // Which insurers are set up, with their public client IDs (never the secrets).
+    if (path === "/health" && request.method === "GET") {
+      const ready = {};
+      for (const key of Object.keys(TOKEN_URLS)) { const s = settingsFor(env, key); if (s) ready[key] = { client_id: s.id }; }
+      return reply(200, { ok: true, ready });
+    }
+
+    if (path !== "/token" || request.method !== "POST") return reply(404, { error: "not_found" });
+    if (!allowed) return reply(403, { error: "origin_not_allowed", error_description: "This helper only answers HerePup's own pages." });
+
+    let b;
+    try { b = await request.json(); } catch (e) { return reply(400, { error: "invalid_request", error_description: "Send JSON." }); }
+    const key = `${b.carrier}:${b.env}`;
+    if (!TOKEN_URLS[key]) return reply(400, { error: "invalid_request", error_description: "Unknown insurer or environment." });
+    const s = settingsFor(env, key);
+    if (!s) return reply(503, { error: "not_configured", error_description: `The sign-in helper isn't set up for ${b.carrier} ${b.env} yet.` });
+    if (!GRANTS.has(b.grant_type)) return reply(400, { error: "unsupported_grant_type" });
+
+    const form = new URLSearchParams({ grant_type: b.grant_type });
+    const need = b.grant_type === "authorization_code" ? ["code", "redirect_uri", "code_verifier"] : ["refresh_token"];
+    for (const k of need) {
+      if (typeof b[k] !== "string" || !b[k] || b[k].length > MAX) return reply(400, { error: "invalid_request", error_description: `Missing or invalid ${k}.` });
+      form.set(k, b[k]);
+    }
+    if (b.grant_type === "authorization_code" && b.redirect_uri !== origin + "/app/callback/")
+      return reply(400, { error: "invalid_request", error_description: "Unexpected callback address." });
+
+    let r;
+    try {
+      r = await fetch(s.tokenUrl, { method: "POST", body: form, headers: { "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json", Authorization: "Basic " + btoa(`${s.id}:${s.secret}`) } });
+    } catch (e) { return reply(502, { error: "insurer_unreachable", error_description: "The insurer's sign-in server didn't answer." }); }
+    const text = await r.text();
+    let j;
+    try { j = JSON.parse(text); } catch (e) { j = { error: "bad_response", error_description: `The insurer's sign-in server answered ${r.status}.` }; }
+    return reply(r.status, j);
+  },
+};

@@ -1,9 +1,14 @@
 // Direct insurer connections from the browser (in testing: turn on with /app/?connect=test, off with ?connect=off).
 // SMART on FHIR authorization code with PKCE. The insurer returns the sign-in to /app/callback/ on this same site,
 // which leaves the code for this tab, and the claims then come straight from the insurer to this browser.
-// HerePup has no server in between. That only works if the insurer's servers allow browser requests (CORS);
-// check() tests that before anyone signs in.
+// Claims never pass through HerePup. One step can: insurers like Aetna require a client secret to trade the
+// sign-in code for an access token, and block browsers from that step (CORS). HerePup's sign-in helper (a small
+// Cloudflare Worker, source in _tools/signin-helper/) holds the secret, does that one exchange, keeps nothing,
+// and hands the answer back. check() tests what this browser can reach before anyone signs in.
 "use strict";
+
+// HerePup's sign-in helper. Empty = the browser does the token step itself (works only where the insurer allows it).
+const HELPER_URL = "";
 
 export const CARRIERS = {
   aetna: {
@@ -73,6 +78,21 @@ export function forget() {
   for (const k of [SKEY, PKEY, MODE]) write(localStorage, k, null);
   for (const k of [TKEY, RKEY]) write(sessionStorage, k, null);
 }
+export const helperUrl = (cfg = {}) => String(cfg.helper || HELPER_URL).replace(/\/+$/, "");
+const helperInfos = {};
+// The helper's /health: which insurers it's set up for, with their public client IDs.
+export function helperInfo(url) {
+  if (!helperInfos[url]) helperInfos[url] = fetch(url + "/health", { credentials: "omit", cache: "no-store" })
+    .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+    .catch((e) => { delete helperInfos[url]; throw e; });
+  return helperInfos[url];
+}
+async function clientIdFor(cid, cfg, ep) {
+  if (cfg.client_id) return cfg.client_id;
+  const helper = helperUrl(cfg);
+  if (!helper) return "";
+  try { return (((await helperInfo(helper)).ready || {})[`${cid}:${ep.env}`] || {}).client_id || ""; } catch (e) { return ""; }
+}
 export const pendingCarrier = () => (read(localStorage, PKEY, null) || {}).cid || "";
 
 const b64url = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -81,12 +101,14 @@ const random = (n) => b64url(crypto.getRandomValues(new Uint8Array(n)));
 // Send the browser to the insurer's sign-in page.
 export async function start(cid) {
   const c = CARRIERS[cid], cfg = settings(cid), ep = endpoints(cid, cfg);
-  if (!cfg.client_id) throw new Error(`Enter the client ID from the ${c.name} developer portal first (under App settings).`);
+  const clientId = await clientIdFor(cid, cfg, ep);
+  if (!clientId) throw new Error(helperUrl(cfg) ? `HerePup's sign-in helper isn't set up for ${c.name} ${ep.env} yet, or couldn't be reached. Try again in a minute.`
+    : `Enter the client ID from the ${c.name} developer portal first (under App settings).`);
   if (!window.crypto || !crypto.subtle) throw new Error("This browser can't do a secure sign-in here. Open HerePup at https://herepup.health/app/.");
   const verifier = random(48), state = "hpw." + random(24);
   const challenge = b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
-  write(localStorage, PKEY, { state, verifier, cid, env: ep.env, redirect: callbackUrl(), t: Date.now() });
-  const q = new URLSearchParams({ response_type: "code", client_id: cfg.client_id, redirect_uri: callbackUrl(), scope: c.scope, state,
+  write(localStorage, PKEY, { state, verifier, cid, env: ep.env, redirect: callbackUrl(), client_id: clientId, t: Date.now() });
+  const q = new URLSearchParams({ response_type: "code", client_id: clientId, redirect_uri: callbackUrl(), scope: c.scope, state,
     aud: ep.aud, code_challenge: challenge, code_challenge_method: "S256", ...(ep.extra || {}) });
   location.assign(ep.authorize + (ep.authorize.includes("?") ? "&" : "?") + q.toString().replace(/\+/g, "%20"));
 }
@@ -103,7 +125,16 @@ async function send(url, opts, what) {
   }
 }
 
-async function tokenRequest(c, cfg, ep, form) {
+async function tokenRequest(cid, c, cfg, ep, form) {
+  const helper = helperUrl(cfg);
+  if (helper) { // the helper adds the secret and talks to the insurer; its reply is the insurer's own
+    const r = await send(helper + "/token", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ carrier: cid, env: ep.env, ...form }) }, "HerePup's sign-in helper");
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(`${c.name} refused the sign-in (${r.status}${j.error ? ", " + (j.error_description || j.error) : ""}).`
+      + (r.status === 401 ? " The client ID or secret in the sign-in helper may not match this app." : ""));
+    return j;
+  }
   const headers = { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" };
   const body = new URLSearchParams(form);
   if (c.basic && cfg.client_secret) headers.Authorization = "Basic " + btoa(`${cfg.client_id}:${cfg.client_secret}`);
@@ -129,7 +160,7 @@ export async function finish(ret) {
   if (ret.error) throw new Error(`The ${c.name} sign-in didn't finish: ${ret.error}`);
   if (!ret.code) throw new Error(`${c.name} didn't send back a sign-in code. Press Connect again.`);
   const cfg = settings(cid), ep = endpoints(cid, { ...cfg, env: pend.env });
-  const tok = await tokenRequest(c, cfg, ep, { grant_type: "authorization_code", code: ret.code, redirect_uri: pend.redirect, code_verifier: pend.verifier });
+  const tok = await tokenRequest(cid, c, cfg, ep, { grant_type: "authorization_code", code: ret.code, redirect_uri: pend.redirect, code_verifier: pend.verifier });
   if (!tok.access_token) throw new Error(`${c.name} didn't return an access token.`);
   const rec = { access_token: tok.access_token, patient: tok.patient || "", env: pend.env, expires_at: Date.now() + 1000 * Number(tok.expires_in || 3600) };
   const all = read(sessionStorage, TKEY, {}); all[cid] = rec; write(sessionStorage, TKEY, all);
@@ -177,17 +208,18 @@ export async function pull(cid, onProgress = () => {}) {
   return { resources: got, eobs: eobs.filter((r) => r.resourceType === "ExplanationOfBenefit").length, env: tok.env, notes };
 }
 
-// Can this browser reach the insurer's servers directly? Harmless requests shaped like the real ones (a made-up
-// client, code and token), so the browser runs the same permission checks (CORS) it will need later.
-// token: the sign-in server (code -> access token). fhir: the claims server.
+// What can this browser reach? Harmless requests shaped like the real ones (a made-up client, code and token), so
+// the browser runs the same permission checks (CORS) it will need later. fhir: the claims server. token: the
+// insurer's sign-in server, or with the helper, whether the helper answers and is set up for this insurer.
 export async function check(cid) {
-  const ep = endpoints(cid), base = { credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer" };
+  const cfg = settings(cid), ep = endpoints(cid, cfg), helper = helperUrl(cfg);
+  const base = { credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer" };
   const ok = (p) => p.then(() => true, () => false);
-  const [token, fhir] = await Promise.all([
-    ok(fetch(ep.token, { ...base, method: "POST",
+  const fhir = ok(fetch(ep.fhir.replace(/\/+$/, "") + "/metadata", { ...base, headers: { Accept: "application/fhir+json", Authorization: "Bearer check" } }));
+  const token = helper
+    ? helperInfo(helper).then((h) => (((h.ready || {})[`${cid}:${ep.env}`]) ? true : "not-set-up"), () => false)
+    : ok(fetch(ep.token, { ...base, method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: "Basic " + btoa("herepup-check:check") },
-      body: "grant_type=authorization_code&code=check&redirect_uri=" + encodeURIComponent(callbackUrl()) })),
-    ok(fetch(ep.fhir.replace(/\/+$/, "") + "/metadata", { ...base, headers: { Accept: "application/fhir+json", Authorization: "Bearer check" } })),
-  ]);
-  return { token, fhir };
+      body: "grant_type=authorization_code&code=check&redirect_uri=" + encodeURIComponent(callbackUrl()) }));
+  return { token: await token, fhir: await fhir, helper: !!helper };
 }

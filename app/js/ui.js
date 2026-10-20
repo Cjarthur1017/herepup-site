@@ -284,13 +284,18 @@ function insurerCard() {
 function cxCheckLine(cid, env) {
   const r = cxCheck[`${cid}:${env}`], name = esc(CX.CARRIERS[cid].name);
   if (r == null) return `<p class="cx-check muted" id="cx-check">Checking whether ${name} accepts connections from this browser...</p>`;
-  if (r.token && r.fhir) return `<p class="cx-check ok" id="cx-check"><span aria-hidden="true">&#10003;</span> ${name}'s sign-in and claims servers both accept connections from this browser.</p>`;
-  const part = (ok, what) => `${what}: ${ok ? "reachable" : "<b>blocked</b>"}`;
-  return `<p class="cx-check warn" id="cx-check"><b>This browser couldn't reach all of ${name}'s servers directly.</b> ${part(r.token, "Sign-in server")}. ${part(r.fhir, "Claims server")}.
-    ${name} may not allow browser connections (CORS), or an extension blocked them. You can still try; HerePup will say exactly where it stops.</p>`;
+  if (r.token === true && r.fhir) return `<p class="cx-check ok" id="cx-check"><span aria-hidden="true">&#10003;</span> ${r.helper
+    ? `HerePup's sign-in helper is ready, and ${name}'s claims server accepts connections from this browser.`
+    : `${name}'s sign-in and claims servers both accept connections from this browser.`}</p>`;
+  const signin = r.helper ? `HerePup's sign-in helper: ${r.token === "not-set-up" ? `<b>not set up for ${name} ${esc(env)} yet</b>` : r.token ? "ready" : "<b>unreachable</b>"}`
+    : `${name}'s sign-in server: ${r.token ? "reachable" : "<b>blocked</b>"}`;
+  return `<p class="cx-check warn" id="cx-check"><b>Not everything is reachable from this browser.</b> ${signin}. ${name}'s claims server: ${r.fhir ? "reachable" : "<b>blocked</b>"}.
+    ${r.fhir ? "" : `${name} may not allow browser connections (CORS), or an extension blocked it. `}You can still try; HerePup will say exactly where it stops.</p>`;
 }
 function connectPanel(cid) {
   const c = CX.CARRIERS[cid], cfg = CX.settings(cid), ep = CX.endpoints(cid, cfg), tok = CX.connection(cid), key = `${cid}:${ep.env}`;
+  const helper = CX.helperUrl(cfg);
+  if (helper && cfg.client_secret) CX.saveSettings(cid, { client_secret: undefined }); // the helper holds the secret now
   if (!(key in cxCheck)) {
     cxCheck[key] = null;
     CX.check(cid).then((res) => { cxCheck[key] = res; const el = document.getElementById("cx-check"); if (el && CX.endpoints(cid).env === ep.env) el.outerHTML = cxCheckLine(cid, ep.env); });
@@ -302,13 +307,18 @@ function connectPanel(cid) {
        <div class="row"><button class="btn primary" data-act="cx-pull" data-cid="${cid}">Pull claims again</button><button class="btn" data-act="cx-connect" data-cid="${cid}">Connect another family member</button><button class="btn small" data-act="cx-disconnect" data-cid="${cid}">Disconnect</button></div>`
     : `<div class="row"><button class="btn primary" data-act="cx-connect" data-cid="${cid}">Connect to ${esc(c.name)}</button></div>`;
   return `<div class="cx" id="cx-panel"><h3>Connect to ${esc(c.name)} <span class="pill">Testing</span></h3>
-    <p class="muted">Sign in at ${esc(c.name)} and your claims come straight into this browser. Nothing passes through HerePup.</p>
+    <p class="muted">Sign in at ${esc(c.name)} and your claims come straight into this browser. ${helper
+      ? "Only the one-time sign-in step goes through HerePup's sign-in helper, which keeps nothing." : "Nothing passes through HerePup."}</p>
     <label>Which data<select data-cx="env" data-cid="${cid}">${envs}</select></label>
-    <details ${cfg.client_id ? "" : "open"}><summary><b>App settings from the ${esc(c.name)} developer portal</b></summary>
+    ${helper ? `<details><summary><b>App settings</b></summary>
+      <label>Client ID (leave blank to use the sign-in helper's)<input data-cx="client_id" data-cid="${cid}" value="${esc(cfg.client_id || "")}" autocomplete="off" spellcheck="false"></label>
+      <label>Callback URL registered in the portal<input readonly value="${esc(CX.callbackUrl())}" data-select-all></label>
+      <p class="muted">The client secret is kept in HerePup's sign-in helper, not in this browser.</p></details>`
+    : `<details ${cfg.client_id ? "" : "open"}><summary><b>App settings from the ${esc(c.name)} developer portal</b></summary>
       <div class="row"><label>Client ID<input data-cx="client_id" data-cid="${cid}" value="${esc(cfg.client_id || "")}" autocomplete="off" spellcheck="false"></label>
         <label>Client secret<input type="password" data-cx="client_secret" data-cid="${cid}" placeholder="${cfg.client_secret ? "Saved. Leave blank to keep it" : "If the portal issued one"}" autocomplete="off"></label></div>
       <label>Callback URL to register in the portal<input readonly value="${esc(CX.callbackUrl())}" data-select-all></label>
-      <p class="muted">Kept only in this browser. "Delete all my data" erases them.</p></details>
+      <p class="muted">Kept only in this browser. "Delete all my data" erases them.</p></details>`}
     ${cxCheckLine(cid, ep.env)}
     ${ep.hint ? `<p class="muted">${esc(ep.hint)}</p>` : ""}
     ${actions}
