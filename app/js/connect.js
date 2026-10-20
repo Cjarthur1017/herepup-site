@@ -43,6 +43,8 @@ export const CARRIERS = {
     basic: true,
     askMember: true,  // no name comes back, so the member says whose Medicare it is before connecting
     noPatient: true,  // Patient isn't readable without demographics
+    // A sign-in that names no beneficiary is almost always the Blue Button developer account still signed in in this browser.
+    noPatientHint: "Medicare didn't say which beneficiary signed in. If you're signed in to the Blue Button developer site (sandbox.bluebutton.cms.gov) in this browser, sign out of it, or use a private window, then connect again and sign in with a test beneficiary.",
     slash: true,      // Blue Button's resource paths end in "/"
     covers: "Blue Button covers people with Original Medicare (Parts A, B and D), including Part D drug claims. Medicare Advantage plans connect through their own insurer.",
     envs: {
@@ -221,6 +223,7 @@ export async function pull(cid, onProgress = () => {}) {
   const path = (p, q = "") => `${base}/${p}${c.slash ? "/" : ""}${q ? "?" + q : ""}`;
   const tolerant = async (url, max, label) => { try { return await getAll(url, max); } catch (e) { if (e.blocked || !e.status) throw e; notes.push(`${label}: ${e.message}`); return []; } };
   const pid = tok.patient, got = [];
+  if (!pid && c.noPatientHint) { disconnect(cid); throw new Error(c.noPatientHint); }
   if (pid) {
     if (!c.noPatient) got.push(...await tolerant(path(`Patient/${encodeURIComponent(pid)}`), 1, "Member"));
     got.push(...await tolerant(path("Coverage", `beneficiary=${encodeURIComponent("Patient/" + pid)}`), 40, "Coverage"));
