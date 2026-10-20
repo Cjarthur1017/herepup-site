@@ -75,7 +75,7 @@
 <main class="doc">
 <p class="crumbs"><a href="/about/">About</a> <span aria-hidden="true">›</span> Privacy policy</p>
 <h1>Privacy Policy</h1>
-<p class="meta">Effective October 16, 2026. Updated October 20, 2026 to describe insurer connections in the web version (in testing) and the sign-in helper they use.</p>
+<p class="meta">Effective October 16, 2026. Updated October 20, 2026 to adopt the CARIN Alliance Code of Conduct and to describe insurer connections in the web version (in testing) and the sign-in helper they use.</p>
 
 <h2>The short version</h2>
 <ul>
@@ -84,10 +84,11 @@
   <li>HerePup does not sell, rent or share your information, and does not use it for advertising, marketing or insurance underwriting.</li>
   <li>The app connects to your health insurer only when you choose to, with your own sign-in at the insurer, and only to read your data. For some insurers, the sign-in step passes through HerePup's <a href="#signin-helper">sign-in helper</a>, which keeps nothing; your claims never do.</li>
   <li>You can disconnect your insurer or delete all of your data in the app at any time.</li>
+  <li>HerePup follows the <a href="#carin">CARIN Alliance Code of Conduct</a>, a voluntary set of privacy rules for consumer health apps.</li>
 </ul>
 
 <h2>Who we are</h2>
-<p>HerePup ("HerePup", "we", "us") makes HerePup | Pick yoUr Plan, an app that helps households compare health plan options using their own claims history. Contact us at <a href="mailto:privacy@herepup.health">privacy@herepup.health</a>.</p>
+<p>HerePup ("HerePup", "we", "us") makes HerePup | Pick yoUr Plan, an app that helps households compare health plan options using their own claims history. HerePup is operated by Christopher Arthur, its founder, who is responsible for its privacy practices. Contact us at <a href="mailto:chris@herepup.health">chris@herepup.health</a> or through our <a href="/contact/">contact page</a>.</p>
 
 <h2>What the app uses, and why</h2>
 <div class="scroll"><table>
@@ -98,7 +99,11 @@
   <tr><td>Insurer coverage record (plan name, coverage dates)</td><td>Your insurer, if you connect it</td><td>To show which plan your claims were processed under</td></tr>
   <tr><td>Access tokens from your insurer</td><td>Your insurer, after you approve the connection</td><td>To read your data from the insurer when you press Pull claims</td></tr>
 </table></div>
-<p>The app does not use diagnosis information to make its estimates. It reads only what is needed to price claims under each plan.</p>
+<p>The app does not use diagnosis information to make its estimates. It reads only what is needed to price claims under each plan, and it uses your information only for what you see in the app: estimating plan costs, showing when costs land, and showing where the same care cost less.</p>
+<p><b>No de-identified data.</b> HerePup does not create, use, sell or share de-identified, anonymized or pseudonymized versions of your health information. The only counts HerePup keeps are the anonymous <a href="#usage">usage counts</a>, which never include health information. We will never try to re-identify anyone from data that has had identities removed.</p>
+
+<h2 id="household">Other people in your household</h2>
+<p>A household's claims include care for everyone on the plan, so they can reveal information about your spouse, partner or children. Add only people you are authorized to act for, and connect only your own insurer account: each adult signs in to their own account, and the insurer decides what it shares for each person. Information about other people stays on your device like everything else, and "Delete all my data" removes it.</p>
 
 <h2>Where your information is stored</h2>
 <p><b>Web version (herepup.health/app).</b> Your files are read by your browser on your device; they are not uploaded. What HerePup reads from them (your household, plans and claims, but not the files themselves) is saved in your browser's own storage on that device so you can come back to it. It stays there until you choose "Delete all my data" or clear your browser's site data. Anyone who uses the same browser profile on that device could see it, so use your own device and browser profile.</p>
@@ -106,19 +111,42 @@
 <p><b>Desktop version (in private testing, not publicly available).</b> Everything above is stored in the app's data folder on the computer where you run HerePup. HerePup has no servers that receive or store your health information, and we cannot see it. Copies of the data you pull from your insurer are kept in that folder so you can review exactly what was received.</p>
 <p>Because your information lives on your device, its security also depends on your device. We recommend using HerePup only on a computer you control, with a password and up-to-date software.</p>
 
+<h2 id="security">How your information is protected</h2>
+<ul>
+  <li><b>No HerePup servers hold it.</b> Your documents, plans and claims are read and kept on your own device. HerePup has no database of user information to lose.</li>
+  <li><b>Encrypted in transit.</b> herepup.health, the sign-in helper and every insurer connection use encrypted HTTPS connections.</li>
+  <li><b>On your device.</b> HerePup doesn't add its own encryption to what it saves in your browser or the desktop app's folder; it is protected by your device and browser. Turning on your device's disk encryption and a screen lock protects it further.</li>
+  <li><b>Insurer access.</b> You sign in on your insurer's own page, using your insurer's own credentials; HerePup never sees or stores your insurer password. Access is read-only. In the web version the access token is kept only in that browser tab.</li>
+  <li><b>The sign-in helper.</b> HerePup's app secrets are kept in Cloudflare's encrypted settings, never in the app. The helper only answers requests from herepup.health, only for HerePup's own callback page, and only ever contacts the insurer sign-in addresses it was built for. Request logging is turned off.</li>
+  <li><b>No accounts.</b> HerePup has no user accounts or passwords, so there are no dormant accounts to take over. Insurer access tokens expire on the insurer's schedule.</li>
+</ul>
+
+<h2 id="incidents">If something goes wrong</h2>
+<p>If we learn of a security incident affecting HerePup's systems (such as this website or the sign-in helper) or our users' information, we will investigate promptly, fix the cause, and notify affected users, insurers and regulators as the law requires, including the Federal Trade Commission's Health Breach Notification Rule where it applies. Because HerePup has no accounts, we will post a notice on herepup.health and in the app, and email anyone who has given us their email address.</p>
+
 <h2 id="connect">Connecting to your insurer</h2>
 <p>Direct insurer connections are in testing, in a private desktop version and in the web version, and aren't available to the public yet. Today you download your claims from your insurer yourself and drop the files in. The rest of this section describes how connections work in testing, and how they will work once insurers approve HerePup.</p>
-<p>When you choose to connect an insurer (for example, Aetna), the app sends you to the insurer's own sign-in page. You sign in there and approve read-only access; HerePup never sees or stores your insurer username or password. The insurer then gives the app an access token, which is used only to read your claims when you connect or ask the app to pull claims. The desktop version stores it on your computer. The web version keeps it only in that browser tab, and it's gone when you close the tab. Either way, your claims come straight from your insurer to your device.</p>
+<p>Before connecting, the app asks you to confirm that you want it to read your claims and coverage from that insurer, with a link to this policy. When you choose to connect an insurer (for example, Aetna), the app sends you to the insurer's own sign-in page. You sign in there and approve read-only access; HerePup never sees or stores your insurer username or password. The insurer then gives the app an access token, which is used only to read your claims when you connect or ask the app to pull claims. The desktop version stores it on your computer. The web version keeps it only in that browser tab, and it's gone when you close the tab. Either way, your claims come straight from your insurer to your device.</p>
 <p id="signin-helper"><b>Sign-in helper (web version).</b> Some insurers, including Aetna, require an app secret to finish a sign-in, and don't let a web page do that step itself. For those insurers, the web version sends the one-time sign-in code from your insurer to HerePup's sign-in helper, a small service HerePup runs on Cloudflare's network. The helper adds HerePup's app secret, exchanges the code with your insurer for an access token, and passes your insurer's answer straight back to your browser. It doesn't store or log the code or the token, and it never receives your claims or other health information: your browser fetches those from your insurer directly.</p>
-<p>You can end this access at any time with Disconnect in the app, which deletes the stored tokens. You may also manage connected apps with your insurer directly. Each adult on a plan connects separately and the app receives only the data the insurer makes available to that person.</p>
+<p><b>One-time, not ongoing.</b> HerePup reads your records only when you connect or press "Pull claims again". It does not refresh them in the background or on a schedule. What it reads is your coverage record, your explanations of benefits (claims) and the providers they name.</p>
+<p>You can end this access at any time with Disconnect in the app, which deletes the stored tokens so HerePup can't read anything more. Claims already brought into HerePup stay on your device until you remove them with "Delete all my data". You may also manage connected apps with your insurer directly. Each adult on a plan connects separately and the app receives only the data the insurer makes available to that person.</p>
 
-<h2>Information sent to anyone else</h2>
+<h2 id="access">Seeing, correcting and checking your information</h2>
+<ul>
+  <li><b>Everything HerePup has is in front of you.</b> Every claim is shown for you to review before it's saved, and your household, plans and saved claims are all in the app. The desktop version also keeps a copy of exactly what your insurer sent; the web version lets you download it while testing a connection.</li>
+  <li><b>You can correct it.</b> You can change, skip or delete any row before saving, edit plan details at any time, and re-import. Changes stay in HerePup on your device; they aren't sent to your insurer. To correct your insurer's own records, contact your insurer.</li>
+  <li><b>Where each claim came from.</b> HerePup records which file or insurer connection each saved claim came from, and when it was added.</li>
+  <li><b>Incomplete or late data.</b> Claims usually reach your insurer's records a few weeks after the care, and documents or insurer data can be incomplete or contain errors. HerePup highlights rows it couldn't read fully or whose amounts don't add up, asks you to check them, and shows how closely its model matches what your insurer actually charged. Its results are estimates, not guarantees.</li>
+</ul>
+
+<h2 id="sharing">Information sent to anyone else</h2>
 <p>The web version sends only the anonymous usage counts described under <a href="#usage">Usage counts</a>, which never include your information, and any feedback or contact message you choose to send (see <a href="#messages">Messages you send us</a>). If you connect an insurer from the web version, it also contacts your insurer to read your own records, and HerePup's <a href="#signin-helper">sign-in helper</a> for the one-time sign-in exchange. The desktop version sends requests directly from your computer to:</p>
 <ul>
   <li><b>Your insurer</b>, only after you connect it, to read your own records.</li>
   <li><b>The public NPI Registry run by the U.S. Centers for Medicare &amp; Medicaid Services</b>, to look up a provider's specialty (for example, whether a visit was with a specialist). Only provider names, and a state if you enter one, are sent; never your name, amounts or diagnoses. You can turn this off in the app.</li>
 </ul>
-<p>Nothing else is sent. The desktop version includes no advertising, analytics or tracking, and neither version includes advertising or tracking across other websites.</p>
+<p>Nothing else is sent. The desktop version includes no advertising, analytics or tracking, and neither version includes advertising or tracking across other websites. HerePup never sends your information to anyone you didn't choose: the only destinations are your own device and the insurer you connect.</p>
+<p><b>Service providers.</b> HerePup uses GitHub Pages to host this website, Cloudflare to run the sign-in helper, Plausible Analytics for anonymous usage counts, and Web3Forms to deliver messages you send us. Each is bound by its own terms and privacy commitments. None of them receives your documents, plans or claims; Cloudflare handles only the one-time sign-in exchange described above, which it doesn't keep.</p>
 
 <h2>What we never do</h2>
 <ul>
@@ -135,7 +163,7 @@
 <p>HerePup is a consumer app that you choose to use with your own information. It is not a health plan or health care provider, and it does not act on behalf of one, so HIPAA generally does not apply to information you bring into HerePup. We handle it as described in this policy regardless.</p>
 
 <h2>Children</h2>
-<p>HerePup is meant to be used by adults managing their household's coverage. A household's claims may include children's care; that information is handled the same way as everyone else's and stays on your computer.</p>
+<p>HerePup is meant to be used by adults managing their household's coverage. It is not directed to children under 13, and we don't knowingly collect information from them. A household's claims may include children's care, entered by a parent or guardian; that information is handled the same way as everyone else's and stays on your device.</p>
 
 <h2 id="usage">Usage counts</h2>
 <p>To know how many people use HerePup, and where they get stuck, herepup.health uses <a href="https://plausible.io/data-policy">Plausible Analytics</a>, a privacy-focused service that keeps its data in the EU. It uses no cookies and does not follow you across other websites or from one day to the next.</p>
@@ -154,11 +182,27 @@
 <h2>This website</h2>
 <p>herepup.health is a simple informational site hosted on GitHub Pages. It uses no cookies and no advertising or cross-site tracking; it counts anonymous visits as described under <a href="#usage">Usage counts</a>. Like any web host, GitHub may keep standard server logs, such as IP addresses, for security; see GitHub's privacy statement. If you email us, we use your message only to reply.</p>
 
-<h2>Changes to this policy</h2>
-<p>If we change this policy, we will update the date above. If a change would affect how your information is used, we will explain it in the app before it takes effect.</p>
+<h2 id="before">Before you connect: what to know</h2>
+<ul>
+  <li>Once your insurer sends your claims to HerePup, they're on your device and protected by this policy, not by HIPAA. Keep your device secure.</li>
+  <li>Your claims can show sensitive things, such as visits, prescriptions and providers, for you and your family. Only connect when you're comfortable with that data being on the device you're using.</li>
+  <li>You don't have to connect to use HerePup: you can download your claims from your insurer's website and drop the files in instead.</li>
+  <li>Before connecting any health app, read its privacy policy, check whether it sells or shares data, and check how you can delete your information.</li>
+</ul>
 
-<h2>Contact</h2>
-<p>Questions or requests: <a href="mailto:privacy@herepup.health">privacy@herepup.health</a>.</p>
+<h2 id="carin">Our commitments</h2>
+<ul>
+  <li>HerePup follows the CARIN Alliance Code of Conduct, a voluntary code for consumer-facing health apps covering transparency, consent, use and disclosure, individual access, security, provenance, accountability, education and advocacy.</li>
+  <li>We follow the federal and state laws that apply to HerePup. Christopher Arthur, HerePup's founder, is responsible for these practices, reviews them at least once a year and whenever HerePup changes how it handles information, and will train anyone who joins HerePup on them.</li>
+  <li>HerePup has no third-party privacy or security certification (such as SOC 2, HITRUST or CARIN accreditation) at this time. We will list any we earn here, with their dates.</li>
+  <li>HerePup uses open standards (HL7 FHIR and the CARIN Blue Button format) and supports giving people secure, easy access to their own health information.</li>
+</ul>
+
+<h2>Changes to this policy</h2>
+<p>If we change this policy, we will update the date above. If a change would affect how information already in HerePup is used or shared, we will explain it in the app and ask you to agree before it applies; if you don't agree, you can delete your information instead.</p>
+
+<h2>Contact and complaints</h2>
+<p>Questions, requests or complaints: <a href="mailto:chris@herepup.health">chris@herepup.health</a> or our <a href="/contact/">contact page</a>. We reply within 30 days, and usually much sooner.</p>
 </main>
 
 <footer>

@@ -271,3 +271,5 @@ label.pref{align-items:flex-start;padding:8px 0}label.pref input{margin-top:4px}
 .basis-pick select{width:100%;max-width:100%;min-width:0}
 .basis-line{margin:-6px 0 12px;color:var(--ink);font-size:16px}
 .basis-card{padding:14px 20px}
+.cx-consent{flex-direction:row;align-items:flex-start;gap:10px;margin:12px 0 6px;font-size:15px;color:var(--ink);background:var(--teal-l);padding:10px 12px;border-radius:8px}
+.cx-consent input{margin-top:3px;flex:none;width:18px;height:18px}

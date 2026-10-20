@@ -54,6 +54,10 @@ export function testMode() {
   } catch (e) { return false; }
 }
 
+// The member's go-ahead before connecting (CARIN Code: clear, affirmative permission). Bump the date when the
+// privacy policy's connection terms change, so people confirm again.
+export const CONSENT_VERSION = "2026-10-20";
+
 export const callbackUrl = () => location.origin + "/app/callback/";
 export function settings(cid) { return read(localStorage, SKEY, {})[cid] || {}; }
 export function saveSettings(cid, patch) {
@@ -101,6 +105,7 @@ const random = (n) => b64url(crypto.getRandomValues(new Uint8Array(n)));
 // Send the browser to the insurer's sign-in page.
 export async function start(cid) {
   const c = CARRIERS[cid], cfg = settings(cid), ep = endpoints(cid, cfg);
+  if (cfg.consent !== CONSENT_VERSION) throw new Error(`Tick the box to confirm you want HerePup to read your claims and coverage from ${c.name} first.`);
   const clientId = await clientIdFor(cid, cfg, ep);
   if (!clientId) throw new Error(helperUrl(cfg) ? `HerePup's sign-in helper isn't set up for ${c.name} ${ep.env} yet, or couldn't be reached. Try again in a minute.`
     : `Enter the client ID from the ${c.name} developer portal first (under App settings).`);

@@ -107,7 +107,7 @@ export async function upload(file, kind, order = null, onProgress = () => {}) {
     res = R.parseFhirText(await file.text());
   } else throw new Error("Unknown file type.");
   R.classifyRows(res.rows);
-  for (const r of res.rows) r.member_id = matchMember(r.member, s.household.members);
+  for (const r of res.rows) { r.member_id = matchMember(r.member, s.household.members); r.source = r.source || file.name || ""; } // where each claim came from
   res.kind = kind;
   res.new_people = newPeople(res.rows);
   return res;
@@ -195,7 +195,8 @@ export async function handle(method, path, body, file) {
         billed: r.billed, allowed: r.allowed, plan_paid: r.plan_paid, member_resp: r.member_resp, rx_tier: r.rx_tier ?? null,
         copay: r.copay ?? null, deductible: r.deductible ?? null, coinsurance: r.coinsurance ?? null, service: r.service || "",
         type_source: r.type_source || "", place: r.place || "", source: r.source || "", processed_under: r.processed_under || "",
-        proc: r.proc || "", rx_drug: r.rx_drug || "", pharmacy: r.pharmacy || "", rx_qty: r.rx_qty ?? null, payee: r.payee || "" });
+        proc: r.proc || "", rx_drug: r.rx_drug || "", pharmacy: r.pharmacy || "", rx_qty: r.rx_qty ?? null, payee: r.payee || "",
+        added: r.added || new Date().toISOString().slice(0, 10) });
     }
     if (body.replace) s.claims = clean;
     else { const have = new Set(s.claims.map((c) => c.id)); s.claims.push(...clean.filter((c) => !have.has(c.id))); }
