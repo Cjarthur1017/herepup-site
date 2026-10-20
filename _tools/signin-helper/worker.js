@@ -13,11 +13,16 @@
 //   AETNA_SANDBOX_SECRET        Secret   that app's client secret
 //   AETNA_PRODUCTION_CLIENT_ID  Text     later, once Aetna approves production
 //   AETNA_PRODUCTION_SECRET     Secret   later
+//   MEDICARE_SANDBOX_CLIENT_ID  Text     CMS Blue Button 2.0 sandbox app (Original Medicare)
+//   MEDICARE_SANDBOX_SECRET     Secret   its client secret
+//   MEDICARE_PRODUCTION_...     later, once CMS approves production access
 //   ALLOWED_ORIGINS             Text     optional, comma-separated; default https://herepup.health
 
 const TOKEN_URLS = {
   "aetna:sandbox": "https://vteapif1.aetna.com/fhirdemo/v1/fhirserver_auth/oauth2/token",
   "aetna:production": "https://apif1.aetna.com/fhir/v1/fhirserver_auth/oauth2/token",
+  "medicare:sandbox": "https://sandbox.bluebutton.cms.gov/v2/o/token/",
+  "medicare:production": "https://api.bluebutton.cms.gov/v2/o/token/",
 };
 const GRANTS = new Set(["authorization_code", "refresh_token"]);
 const MAX = 4096; // longest code, verifier or refresh token accepted

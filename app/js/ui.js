@@ -327,6 +327,7 @@ function connectPanel(cid) {
     <p class="muted">Sign in at ${esc(c.name)} and your claims come straight into this browser. ${helper
       ? "Only the one-time sign-in step goes through HerePup's sign-in helper, which keeps nothing." : "Nothing passes through HerePup."}</p>
     <label>Which data<select data-cx="env" data-cid="${cid}">${envs}</select></label>
+    ${c.askMember ? `<label style="margin-top:8px">Whose ${esc(c.name)} is this?<select data-cx="member_id" data-cid="${cid}"><option value="">Choose a person...</option>${S.members.map((m) => `<option value="${esc(m.id)}" ${cfg.member_id === m.id ? "selected" : ""}>${esc(m.name)}</option>`).join("")}</select></label>` : ""}
     ${helper ? `<details><summary><b>App settings</b></summary>
       <label>Client ID (leave blank to use the sign-in helper's)<input data-cx="client_id" data-cid="${cid}" value="${esc(cfg.client_id || "")}" autocomplete="off" spellcheck="false"></label>
       <label>Callback URL registered in the portal<input readonly value="${esc(CX.callbackUrl())}" data-select-all></label>
@@ -356,6 +357,12 @@ async function cxPull(cid) {
     const file = new File([JSON.stringify(bundle)], `${c.name} ${got.env} claims.json`, { type: "application/json" });
     S.cxRaw = { cid, name: `HerePup - ${c.name} ${got.env} - what ${c.name} sent.json`, file }; // kept in memory only, for the download link
     await handleFiles([file], "claims", null, `${c.name} (${got.env})`);
+    if (c.askMember && S.review) { // no name comes back from this insurer: the claims belong to the person chosen before connecting
+      const mid = CX.settings(cid).member_id;
+      let n = 0;
+      for (const r of S.review.rows) if (!r.member_id && r.source === file.name && mid) { r.member_id = mid; n++; }
+      if (n) { S.preview = null; await runPreview(); render(); }
+    }
     if (got.notes.length) { S.msg = got.notes.join(" "); render(); }
   } catch (e) { S.busy = ""; const f = fetchOf("claims"); if (f && f.phase === "fetching") fetchEnd("claims", false, "See the note at the top of the page."); throw e; }
 }

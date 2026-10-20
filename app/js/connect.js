@@ -36,6 +36,27 @@ export const CARRIERS = {
       },
     },
   },
+  medicare: {
+    name: "Medicare",
+    // claims and coverage only: HerePup's Blue Button app doesn't ask for demographics (name, address, birth date...)
+    scope: "patient/ExplanationOfBenefit.read patient/Coverage.read",
+    basic: true,
+    askMember: true,  // no name comes back, so the member says whose Medicare it is before connecting
+    noPatient: true,  // Patient isn't readable without demographics
+    slash: true,      // Blue Button's resource paths end in "/"
+    covers: "Blue Button covers people with Original Medicare (Parts A, B and D), including Part D drug claims. Medicare Advantage plans connect through their own insurer.",
+    envs: {
+      sandbox: {
+        label: "Sandbox (Medicare test beneficiary, no real data)",
+        authorize: "https://sandbox.bluebutton.cms.gov/v2/o/authorize/",
+        token: "https://sandbox.bluebutton.cms.gov/v2/o/token/",
+        fhir: "https://sandbox.bluebutton.cms.gov/v2/fhir",
+        aud: "",
+        extra: {},
+        hint: "Medicare's sandbox test sign-ins: BBUser00001 / PW00001! (any of BBUser00000 to BBUser00029, with the matching PW number and !)",
+      },
+    },
+  },
 };
 
 const SKEY = "herepup.connect", PKEY = "herepup.connect.pending", MODE = "herepup.connect-test"; // this browser
@@ -106,6 +127,7 @@ const random = (n) => b64url(crypto.getRandomValues(new Uint8Array(n)));
 export async function start(cid) {
   const c = CARRIERS[cid], cfg = settings(cid), ep = endpoints(cid, cfg);
   if (cfg.consent !== CONSENT_VERSION) throw new Error(`Tick the box to confirm you want HerePup to read your claims and coverage from ${c.name} first.`);
+  if (c.askMember && !cfg.member_id) throw new Error(`Choose whose ${c.name} account you're connecting first.`);
   const clientId = await clientIdFor(cid, cfg, ep);
   if (!clientId) throw new Error(helperUrl(cfg) ? `HerePup's sign-in helper isn't set up for ${c.name} ${ep.env} yet, or couldn't be reached. Try again in a minute.`
     : `Enter the client ID from the ${c.name} developer portal first (under App settings).`);
@@ -196,20 +218,21 @@ export async function pull(cid, onProgress = () => {}) {
     }
     return out;
   }
+  const path = (p, q = "") => `${base}/${p}${c.slash ? "/" : ""}${q ? "?" + q : ""}`;
   const tolerant = async (url, max, label) => { try { return await getAll(url, max); } catch (e) { if (e.blocked || !e.status) throw e; notes.push(`${label}: ${e.message}`); return []; } };
   const pid = tok.patient, got = [];
   if (pid) {
-    got.push(...await tolerant(`${base}/Patient/${encodeURIComponent(pid)}`, 1, "Member"));
-    got.push(...await tolerant(`${base}/Coverage?beneficiary=${encodeURIComponent("Patient/" + pid)}`, 40, "Coverage"));
+    if (!c.noPatient) got.push(...await tolerant(path(`Patient/${encodeURIComponent(pid)}`), 1, "Member"));
+    got.push(...await tolerant(path("Coverage", `beneficiary=${encodeURIComponent("Patient/" + pid)}`), 40, "Coverage"));
   }
-  const eobs = await getAll(`${base}/ExplanationOfBenefit` + (pid ? `?patient=${encodeURIComponent(pid)}` : ""));
+  const eobs = await getAll(path("ExplanationOfBenefit", pid ? `patient=${encodeURIComponent(pid)}` : ""));
   got.push(...eobs);
   const have = new Set(got.map((r) => `${r.resourceType}/${r.id}`)), refs = new Set();
   for (const e of eobs) for (const ref of [e.provider, ...(e.careTeam || []).map((ct) => ct.provider)]) {
     const rr = (ref || {}).reference || "";
     if (/^(Practitioner|Organization)\//.test(rr) && !have.has(rr)) refs.add(rr);
   }
-  for (const rr of [...refs].slice(0, 60)) got.push(...await tolerant(`${base}/${rr}`, 1, "Provider"));
+  for (const rr of [...refs].slice(0, 60)) got.push(...await tolerant(path(rr), 1, "Provider"));
   return { resources: got, eobs: eobs.filter((r) => r.resourceType === "ExplanationOfBenefit").length, env: tok.env, notes };
 }
 

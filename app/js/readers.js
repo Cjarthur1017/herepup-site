@@ -545,6 +545,14 @@ const known = (v) => { const t = String(v || "").trim(); return /^(unknown|n\/?a
 const sumCats = (list) => { const o = {}; for (const a of list || []) { const v = (a.amount || {}).value; if (v == null) continue; for (const c of codes(a.category)) o[c.toLowerCase()] = (o[c.toLowerCase()] || 0) + Number(v); } return o; };
 const COMPLETE = ["eligible", "benefit", "paidtoprovider", "memberliability"];
 const uniq = (a) => [...new Set(a)];
+// Claim type: the HL7 claim-type code wherever it appears among the codings, or Medicare Blue Button's own claim types.
+const HL7_TYPES = ["institutional", "oral", "pharmacy", "professional", "vision"];
+const BB_TYPES = { carrier: "professional", dme: "professional", pde: "pharmacy", inpatient: "institutional", outpatient: "institutional",
+  snf: "institutional", hha: "institutional", hospice: "institutional" };
+function claimType(eob) {
+  const cs = codes(eob.type).map((x) => x.toLowerCase());
+  return cs.find((x) => HL7_TYPES.includes(x)) || cs.map((x) => BB_TYPES[x]).find(Boolean) || cs[0] || "";
+}
 export function mapFhir(resources) {
   const lookup = {}; for (const r of resources) if (r.id) lookup[`${r.resourceType}/${r.id}`] = r;
   const resolve = (ref, contained) => (!ref ? null : contained[ref.reference] || lookup[ref.reference] || null);
@@ -559,13 +567,13 @@ export function mapFhir(resources) {
     if (eob.resourceType !== "ExplanationOfBenefit") continue;
     if (eob.status === "cancelled" || eob.status === "entered-in-error" || eob.outcome === "error") { skipped++; continue; }
     const contained = {}; for (const c of eob.contained || []) if (c.id) contained["#" + c.id] = c;
-    const type = (codes(eob.type)[0] || "").toLowerCase();
+    const type = claimType(eob);
     const member = nameOf(resolve(eob.patient, contained)) || (eob.patient || {}).display || "";
     const nameRef = (ref) => known(nameOf(resolve(ref, contained))) || known((ref || {}).display);
     let provider = nameRef(eob.provider);
     for (const ct of eob.careTeam || []) if (!provider) provider = nameRef(ct.provider);
     if (!provider) provider = nameRef(eob.facility) || nameRef((eob.payee || {}).party); // hospital claims often name only the facility
-    const sub = (codes(eob.subType)[0] || "").toLowerCase();
+    const sub = (codes(eob.subType)[0] || "").toLowerCase() || (codes(eob.type).some((x) => /^inpatient$/i.test(x)) ? "inpatient" : "");
     const tax = (eob.careTeam || []).flatMap((ct) => codes(ct.qualification));
     const claimDate = ((eob.billablePeriod || {}).start || eob.created || "").slice(0, 10);
     const items = eob.item || [];
