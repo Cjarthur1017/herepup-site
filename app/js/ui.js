@@ -282,16 +282,18 @@ function insurerCard() {
 
 // Direct connection (testing): sign in at the insurer; claims come straight into this browser.
 function cxCheckLine(cid, env) {
-  const ok = cxCheck[`${cid}:${env}`], name = CX.CARRIERS[cid].name;
-  if (ok == null) return `<p class="cx-check muted" id="cx-check">Checking whether ${esc(name)} accepts connections from this browser...</p>`;
-  return ok ? `<p class="cx-check ok" id="cx-check"><span aria-hidden="true">&#10003;</span> ${esc(name)}'s sign-in server accepts connections from this browser.</p>`
-    : `<p class="cx-check warn" id="cx-check"><b>This browser couldn't reach ${esc(name)}'s sign-in server directly.</b> ${esc(name)} may not allow browser connections (CORS), or an extension blocked it. You can still try; HerePup will say exactly where it stops.</p>`;
+  const r = cxCheck[`${cid}:${env}`], name = esc(CX.CARRIERS[cid].name);
+  if (r == null) return `<p class="cx-check muted" id="cx-check">Checking whether ${name} accepts connections from this browser...</p>`;
+  if (r.token && r.fhir) return `<p class="cx-check ok" id="cx-check"><span aria-hidden="true">&#10003;</span> ${name}'s sign-in and claims servers both accept connections from this browser.</p>`;
+  const part = (ok, what) => `${what}: ${ok ? "reachable" : "<b>blocked</b>"}`;
+  return `<p class="cx-check warn" id="cx-check"><b>This browser couldn't reach all of ${name}'s servers directly.</b> ${part(r.token, "Sign-in server")}. ${part(r.fhir, "Claims server")}.
+    ${name} may not allow browser connections (CORS), or an extension blocked them. You can still try; HerePup will say exactly where it stops.</p>`;
 }
 function connectPanel(cid) {
   const c = CX.CARRIERS[cid], cfg = CX.settings(cid), ep = CX.endpoints(cid, cfg), tok = CX.connection(cid), key = `${cid}:${ep.env}`;
   if (!(key in cxCheck)) {
     cxCheck[key] = null;
-    CX.check(cid).then((ok) => { cxCheck[key] = ok; const el = document.getElementById("cx-check"); if (el && CX.endpoints(cid).env === ep.env) el.outerHTML = cxCheckLine(cid, ep.env); });
+    CX.check(cid).then((res) => { cxCheck[key] = res; const el = document.getElementById("cx-check"); if (el && CX.endpoints(cid).env === ep.env) el.outerHTML = cxCheckLine(cid, ep.env); });
   }
   const envs = Object.entries(c.envs).map(([k, v]) => `<option value="${k}" ${ep.env === k ? "selected" : ""}>${esc(v.label)}</option>`).join("");
   const mins = tok ? Math.max(1, Math.round((tok.expires_at - Date.now()) / 60000)) : 0;

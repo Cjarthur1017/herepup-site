@@ -177,14 +177,17 @@ export async function pull(cid, onProgress = () => {}) {
   return { resources: got, eobs: eobs.filter((r) => r.resourceType === "ExplanationOfBenefit").length, env: tok.env, notes };
 }
 
-// Can this browser reach the insurer's sign-in server directly? A harmless request shaped like the real one
-// (a made-up client and code), so the browser runs the same permission check (CORS) it will need later.
+// Can this browser reach the insurer's servers directly? Harmless requests shaped like the real ones (a made-up
+// client, code and token), so the browser runs the same permission checks (CORS) it will need later.
+// token: the sign-in server (code -> access token). fhir: the claims server.
 export async function check(cid) {
-  const ep = endpoints(cid);
-  try {
-    await fetch(ep.token, { method: "POST", credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer",
+  const ep = endpoints(cid), base = { credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer" };
+  const ok = (p) => p.then(() => true, () => false);
+  const [token, fhir] = await Promise.all([
+    ok(fetch(ep.token, { ...base, method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: "Basic " + btoa("herepup-check:check") },
-      body: "grant_type=authorization_code&code=check&redirect_uri=" + encodeURIComponent(callbackUrl()) });
-    return true;
-  } catch (e) { return false; }
+      body: "grant_type=authorization_code&code=check&redirect_uri=" + encodeURIComponent(callbackUrl()) })),
+    ok(fetch(ep.fhir.replace(/\/+$/, "") + "/metadata", { ...base, headers: { Accept: "application/fhir+json", Authorization: "Bearer check" } })),
+  ]);
+  return { token, fhir };
 }
