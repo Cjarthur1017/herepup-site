@@ -540,6 +540,11 @@ export function classifyItem(type, pos, rev, cpt, tax) {
   if (officeLike) return ["procedure", "Done in the provider's office (place of service 11)"];
   return null;
 }
+// "Unknown" and the like are placeholders some insurers send instead of a name.
+const known = (v) => { const t = String(v || "").trim(); return /^(unknown|n\/?a|none|null|-)$/i.test(t) ? "" : t; };
+const sumCats = (list) => { const o = {}; for (const a of list || []) { const v = (a.amount || {}).value; if (v == null) continue; for (const c of codes(a.category)) o[c.toLowerCase()] = (o[c.toLowerCase()] || 0) + Number(v); } return o; };
+const COMPLETE = ["eligible", "benefit", "paidtoprovider", "memberliability"];
+const uniq = (a) => [...new Set(a)];
 export function mapFhir(resources) {
   const lookup = {}; for (const r of resources) if (r.id) lookup[`${r.resourceType}/${r.id}`] = r;
   const resolve = (ref, contained) => (!ref ? null : contained[ref.reference] || lookup[ref.reference] || null);
@@ -556,28 +561,42 @@ export function mapFhir(resources) {
     const contained = {}; for (const c of eob.contained || []) if (c.id) contained["#" + c.id] = c;
     const type = (codes(eob.type)[0] || "").toLowerCase();
     const member = nameOf(resolve(eob.patient, contained)) || (eob.patient || {}).display || "";
-    let provider = nameOf(resolve(eob.provider, contained)) || (eob.provider || {}).display || "";
-    for (const ct of eob.careTeam || []) if (!provider) provider = nameOf(resolve(ct.provider, contained)) || (ct.provider || {}).display || "";
+    const nameRef = (ref) => known(nameOf(resolve(ref, contained))) || known((ref || {}).display);
+    let provider = nameRef(eob.provider);
+    for (const ct of eob.careTeam || []) if (!provider) provider = nameRef(ct.provider);
+    if (!provider) provider = nameRef(eob.facility) || nameRef((eob.payee || {}).party); // hospital claims often name only the facility
+    const sub = (codes(eob.subType)[0] || "").toLowerCase();
     const tax = (eob.careTeam || []).flatMap((ct) => codes(ct.qualification));
     const claimDate = ((eob.billablePeriod || {}).start || eob.created || "").slice(0, 10);
     const items = eob.item || [];
-    const useItems = items.some((it) => (it.adjudication || []).length);
     const brand = (eob.supportingInfo || []).filter((s) => codes(s.category).map((c) => c.toLowerCase()).includes("brandgenericindicator")).map((s) => (codes(s.code)[0] || "").toLowerCase());
-    (useItems ? items : [null]).forEach((it, k) => {
-      const a = it ? adjSum(it.adjudication) : (() => { const o = {}; for (const t of eob.total || []) { const v = (t.amount || {}).value; if (v == null) continue; for (const c of codes(t.category)) o[c.toLowerCase()] = (o[c.toLowerCase()] || 0) + Number(v); } return o; })();
+    // One row per line item when every line carries its own adjudicated amounts; otherwise one row for the claim from
+    // its totals (some insurers put only partial amounts on the lines of facility claims).
+    const lineAdj = items.map((it) => sumCats(it.adjudication)), totals = sumCats(eob.total);
+    const useItems = items.length > 0 && (lineAdj.every((a) => COMPLETE.some((k) => k in a)) || (!Object.keys(totals).length && items.some((it) => (it.adjudication || []).length)));
+    (useItems ? items.map((it, k) => ({ it, a: lineAdj[k] })) : [{ it: null, a: totals }]).forEach(({ it, a }, k) => {
+      const all = it ? [it] : items;
       const date = ((it && (it.servicedDate || (it.servicedPeriod || {}).start)) || claimDate).slice(0, 10);
-      const pos = codes(it && it.locationCodeableConcept), rev = codes(it && it.revenue), cpt = codes(it && it.productOrService);
-      const desc = display(it && it.productOrService) || (type ? type[0].toUpperCase() + type.slice(1) : "");
-      let allowed = a.eligible ?? null; const paid = a.benefit ?? a.paidtoprovider ?? null, owe = memberResp(a);
+      const pos = uniq(all.flatMap((x) => codes(x.locationCodeableConcept))), rev = uniq(all.flatMap((x) => codes(x.revenue))), cpt = uniq(all.flatMap((x) => codes(x.productOrService)));
+      const inpatient = type === "institutional" && (sub === "inpatient" || pos.includes("21")) && !(pos.length && pos.every((x) => x === "20" || x === "23"));
+      const first = display(all[0] && all[0].productOrService);
+      const desc = (!it && inpatient ? "Hospital stay (inpatient)" : first + (all.length > 1 && first ? ` and ${all.length - 1} more` : ""))
+        || (type ? type[0].toUpperCase() + type.slice(1) : "");
+      let allowed = a.eligible ?? null, odd = false; const paid = a.benefit ?? a.paidtoprovider ?? null, owe = memberResp(a);
+      // An "allowed" amount below what the plan paid isn't an allowed amount; rebuild it and flag the row.
+      if (allowed != null && paid != null && allowed + 0.01 < paid) { allowed = owe != null ? r2(paid + owe) : null; odd = true; }
       if (allowed == null && paid != null && owe != null) allowed = r2(paid + owe);
-      const typed = classifyItem(type, pos, rev, cpt, tax);
+      if (allowed != null && paid != null && owe != null && Math.abs(allowed - paid - owe) > Math.max(1, allowed * 0.02)) odd = true;
+      const typed = inpatient ? ["medical", "Hospital inpatient stay (claim type or place of service 21)"]
+        : classifyItem(type, pos, rev, cpt, tax)
+          || (type === "institutional" && (pos.includes("19") || pos.includes("22")) ? ["medical", "Hospital outpatient services (place of service)"] : null);
       const row = { id: `fhir-${eob.id || newId()}-${k + 1}`, date, member, provider, service: desc, category: typed ? typed[0] : "medical",
         billed: a.submitted ?? null, allowed, plan_paid: paid, member_resp: owe, copay: a.copay ?? null, deductible: a.deductible ?? null, coinsurance: a.coinsurance ?? null,
-        needs_review: allowed == null, place: pos.includes("11") ? "office" : (pos[0] && ["21", "22", "23"].includes(pos[0]) ? "facility" : ""), claim: eob.id || "" };
+        needs_review: allowed == null || odd, place: pos.includes("11") ? "office" : (pos[0] && ["19", "21", "22", "23"].includes(pos[0]) ? "facility" : ""), claim: eob.id || "" };
       if (typed) Object.assign(row, { type_source: typed[1], type_confidence: "high", type_locked: true });
       if (cpt[0] && row.category !== "rx") row.proc = cpt[0];
       if (row.category === "rx") Object.assign(row, { rx_tier: brand.join("").includes("generic") || !brand.length ? 1 : 2, type_source: "Pharmacy claim" + (brand.length ? ` (${brand[0]})` : ""),
-        rx_drug: desc, pharmacy: provider, rx_qty: it && it.quantity && it.quantity.value != null ? Number(it.quantity.value) : null });
+        rx_drug: desc, pharmacy: provider, rx_qty: all[0] && all[0].quantity && all[0].quantity.value != null ? Number(all[0].quantity.value) : null });
       rows.push(row);
     });
     for (const bb of eob.benefitBalance || []) for (const fin of bb.financial || []) {
