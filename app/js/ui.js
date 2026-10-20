@@ -322,6 +322,7 @@ function connectPanel(cid) {
     ${cxCheckLine(cid, ep.env)}
     ${ep.hint ? `<p class="muted">${esc(ep.hint)}</p>` : ""}
     ${actions}
+    ${S.cxRaw && S.cxRaw.cid === cid ? `<p class="muted"><button type="button" class="linkbtn" data-act="cx-raw">Download exactly what ${esc(c.name)} sent</button> (a FHIR file, for troubleshooting how HerePup reads it).</p>` : ""}
     <p class="muted">${esc(c.covers)}</p></div>`;
 }
 async function cxPull(cid) {
@@ -336,6 +337,7 @@ async function cxPull(cid) {
     }
     const bundle = { resourceType: "Bundle", type: "collection", entry: got.resources.map((r) => ({ resource: r })) };
     const file = new File([JSON.stringify(bundle)], `${c.name} ${got.env} claims.json`, { type: "application/json" });
+    S.cxRaw = { cid, name: `HerePup - ${c.name} ${got.env} - what ${c.name} sent.json`, file }; // kept in memory only, for the download link
     await handleFiles([file], "claims", null, `${c.name} (${got.env})`);
     if (got.notes.length) { S.msg = got.notes.join(" "); render(); }
   } catch (e) { S.busy = ""; const f = fetchOf("claims"); if (f && f.phase === "fetching") fetchEnd("claims", false, "See the note at the top of the page."); throw e; }
@@ -641,7 +643,11 @@ document.addEventListener("click", async (ev) => {
     }
     else if (act === "cx-connect") { await CX.start(t.dataset.cid); }
     else if (act === "cx-pull") { await cxPull(t.dataset.cid); }
-    else if (act === "cx-disconnect") { CX.disconnect(t.dataset.cid); render(); }
+    else if (act === "cx-disconnect") { CX.disconnect(t.dataset.cid); S.cxRaw = null; render(); }
+    else if (act === "cx-raw" && S.cxRaw) {
+      const a = document.createElement("a"), url = URL.createObjectURL(S.cxRaw.file);
+      a.href = url; a.download = S.cxRaw.name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+    }
   } catch (e) { S.err = e.message; render(); }
 });
 
