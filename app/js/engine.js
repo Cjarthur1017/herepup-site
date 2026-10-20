@@ -132,14 +132,21 @@ export function labelConfig(cfg) {
   return "Split: " + p.map((x) => `${x.employer_name} ${x.plan.name || "plan"} (${x.covered.length})`).join("; ");
 }
 
+// claims: one list (one plan year), or a list of lists to average: each is run as its own plan year (deductibles
+// reset) and your share of care is averaged across them. (Averaging is browser-only; one list behaves as in engine.py.)
+export const yearSets = (claims) => (claims.length && Array.isArray(claims[0]) ? claims : [claims]);
+export function memberCostOf(plan, claims, members, multiplier = 1) {
+  const sets = yearSets(claims);
+  return sets.reduce((a, set) => a + simulate(plan, set, members, multiplier).member_cost, 0) / sets.length;
+}
+
 export function analyze(household, employers, claims, multiplier = 1, countHsa = true) {
   const results = [];
   for (const cfg of enumerateConfigs(household, employers)) {
     let total = 0, premium = 0, hsa = 0, mcost = 0;
     const detail = [];
     for (const p of cfg.parts) {
-      const sim = simulate(p.plan, claims, p.covered, multiplier);
-      const eff = effectiveCost(p.plan, p.tier, sim.member_cost, countHsa);
+      const eff = effectiveCost(p.plan, p.tier, memberCostOf(p.plan, claims, p.covered, multiplier), countHsa);
       total += eff.total; premium += eff.premium; hsa += eff.hsa_offset; mcost += eff.member_cost;
       detail.push({ employer: p.employer_name, plan: p.plan.name || "plan", tier: p.tier, covered: p.covered,
         premium: r2(eff.premium), member_cost: r2(eff.member_cost), hsa_offset: r2(eff.hsa_offset), total: r2(eff.total) });

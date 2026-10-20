@@ -5,6 +5,7 @@ import { CARE_LABEL } from "./insights.js";
 import { quickFacts } from "./timeline.js";
 import { mountTimeline } from "./timeline-view.js";
 import * as CX from "./connect.js";
+import { history as claimHistory } from "./years.js";
 const CX_TEST = CX.testMode(); // direct insurer connections, in testing: /app/?connect=test
 const cxCheck = {};
 const STEPS = ["Household", "Plan documents", "Claims", "Your answer", "Your spending"];
@@ -65,6 +66,7 @@ async function load() {
   S.members = st.household.members;
   S.employers = st.employers;
   S.saved.claims = st.claims.length;
+  S.span = spanNote(st.claims);
   S.settings = st.settings || S.settings;
   const cp = st.current_plan;
   S.currentPlan = cp ? `${cp.employer}:${cp.plan_index}` : "";
@@ -77,6 +79,18 @@ async function load() {
   if (ret) { S.step = 2; S.hsaGate = false; S.msg = ""; S.insurer = CX.pendingCarrier() || S.insurer; }
   render();
   if (ret) await cxReturn(ret);
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const monthYear = (d) => (d ? `${MONTHS[+d.slice(5, 7) - 1]} ${d.slice(0, 4)}` : "");
+function spanNote(claims) {
+  const h = claimHistory(claims);
+  return h.months > 12 ? ` They cover ${monthYear(h.first)} to ${monthYear(h.last)}; on Your answer you choose which year to plan around.` : "";
+}
+// "Which year to plan around" (Your answer) and "Which claims to review" (Your spending).
+function basisPicker(b, act, label) {
+  if (!b || !b.options || !b.options.length) return "";
+  return `<label class="basis-pick">${label}<select data-act="${act}">${b.options.map((o) => `<option value="${esc(o.key)}" ${o.key === b.key ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select></label>`;
 }
 
 function render() {
@@ -257,7 +271,7 @@ function reviewTable() {
 }
 
 function stepClaims() {
-  return `<h1>Add your claims</h1><p class="lead">Drop in your explanations of benefits (EOBs) and claim summaries. The last 12 months is the best starting point. We read them on this device, and you check every row.</p><!--MSG-->
+  return `<h1>Add your claims</h1><p class="lead">Drop in your explanations of benefits (EOBs) and claim summaries. The last 12 months is the best starting point; add earlier years to plan around your highest, lowest or average year. We read them on this device, and you check every row.</p><!--MSG-->
   <div class="grid2">${dropZone("claims", "Drop your claims here and we'll fetch the details", "EOB PDFs, claim or pharmacy summaries (CSV or Excel), or a FHIR export from your insurer. Drop several at once; they're combined into one review.")}
   ${insurerCard()}</div>
   ${reviewTable()}
@@ -277,7 +291,7 @@ function insurerCard() {
   const cx = CX_TEST && ins && CX.CARRIERS[ins.id] ? connectPanel(ins.id) : "";
   const steps = cx ? body.replace(/<p class="muted"><b>Direct connection \(in testing\):[\s\S]*$/, "") : body; // the panel replaces the status and request button
   return `<div class="card"><h2>Get your claims from your insurer</h2><label>Your insurer<select data-act="insurer">${opts}</select></label>${cx}${cx ? `<h3 class="cx-or">Or download your claims</h3>` : ""}${steps}
-    <p class="muted">${S.saved.claims} claim(s) already saved in this browser.</p></div>`;
+    <p class="muted">${S.saved.claims} claim(s) already saved in this browser.${esc(S.span || "")}</p></div>`;
 }
 
 // Direct connection (testing): sign in at the insurer; claims come straight into this browser.
@@ -414,15 +428,18 @@ function stepAnswer() {
   const others = a.ranked.slice(0, 6).map((r, i) => `<tr class="${i === 0 ? "ok" : ""}"><td>${esc(r.label)}</td><td>${usd(r.premium)}</td><td>${usd(r.member_cost)}</td><td>${r.hsa_offset ? "-" + usd(r.hsa_offset) : "$0"}</td><td><b>${usd(r.total)}</b></td></tr>`).join("");
   const nameOf = (id) => (S.members.find((m) => m.id === id) || {}).name || id;
   const who = b.detail.map((d) => `<li><b>${esc(d.employer)}: ${esc(d.plan)}</b> covers ${d.covered.map((c) => esc(nameOf(c))).join(", ")} (${esc(d.tier)})</li>`).join("");
-  const flips = a.break_even.flips.length ? a.break_even.flips.map((f) => `<li>Between ${Math.round(f.between[0] * 100)}% and ${Math.round(f.between[1] * 100)}% of the care in your claims history, the best choice changes from <b>${esc(f.from)}</b> to <b>${esc(f.to)}</b>.</li>`).join("") : "<li>The same option wins at every level of care we tested, from none to three times the care in your claims history.</li>";
+  const bs = a.basis || { short: "your claims history", options: [] }, short = esc(bs.short);
+  const flips = a.break_even.flips.length ? a.break_even.flips.map((f) => `<li>Between ${Math.round(f.between[0] * 100)}% and ${Math.round(f.between[1] * 100)}% of the care in ${short}, the best choice changes from <b>${esc(f.from)}</b> to <b>${esc(f.to)}</b>.</li>`).join("") : `<li>The same option wins at every level of care we tested, from none to three times the care in ${short}.</li>`;
+  const picker = basisPicker(bs, "basis", "Which year of your history should HerePup plan around?") + (bs.options.length && bs.note ? `<p class="muted small">${esc(bs.note)}</p>` : "");
   const cal = a.calibration ? calBlock(a.calibration) : `<p class="muted">Pick the plan your claims were processed under on the plan step to see how closely we match your carrier.</p>`;
   const tab = (id, label) => `<button role="tab" id="tab-${id}" aria-selected="${S.answerTab === id}" aria-controls="answer-panel" tabindex="${S.answerTab === id ? 0 : -1}" data-act="answer-tab" data-tab="${id}">${label}</button>`;
-  const head = `<h1>${esc(b.label)}</h1><!--MSG-->${(a.warnings || []).map((w) => `<div class="warn">${esc(w)}</div>`).join("")}
+  const head = `<h1>${esc(b.label)}</h1>${bs.options.length ? `<p class="basis-line">Planning around <b>${short}</b>.${S.answerTab === "month" ? "" : " Change it under What if."}</p>` : ""}<!--MSG-->${(a.warnings || []).map((w) => `<div class="warn">${esc(w)}</div>`).join("")}
   <div class="tl-tabs" role="tablist" aria-label="Ways to see your answer">${tab("year", "Year total")}${tab("month", 'Month by month <span class="tl-new">New</span>')}</div>`;
   const nav = `${FEEDBACK}<div class="row"><button class="btn" data-go="2">Back to claims</button><button class="btn primary" data-go="4">Review your spending</button><button class="btn danger" data-act="wipe">Delete all my data</button></div>`;
   if (S.answerTab === "month") {
     return `${head}<div id="answer-panel" role="tabpanel" aria-labelledby="tab-month">
     <p class="lead">Premiums come out of every paycheck, whether you see a doctor or not. Your share of care lands in the months you get care. Here's how a year of care like yours is likely to play out under each option.</p>
+    ${picker ? `<div class="card basis-card">${picker}</div>` : ""}
     <div id="timeline" class="tl">${S.timeline ? "" : "<p class='muted'>Month by month isn't available for these claims yet.</p>"}</div></div>${nav}`;
   }
   const PREF = { hsa: "Only plans with an HSA", non_hsa: "Only plans without an HSA" };
@@ -432,9 +449,9 @@ function stepAnswer() {
   const q = pick ? quickFacts(pick, S.timeline.window) : null;
   const month = q ? `<p class="muted">Month by month, its biggest month is ${esc(q.peakMonth)} at ${usd(q.peak)}${q.setAside ? `, so set aside about ${usd(q.setAside)} by ${esc(q.setAsideBy)}` : ""}. <button class="linkbtn" data-act="answer-tab" data-tab="month">See month by month</button></p>` : "";
   return `${head}<div id="answer-panel" role="tabpanel" aria-labelledby="tab-year">
-  <div class="grid2"><div class="card"><div class="muted">Estimated yearly cost${S.mult !== 1 ? `, at ${Math.round(S.mult * 100)}% of the care in your claims history` : ", if your care looks like your claims history"}</div><div class="bignum">${usd(b.total)}</div>
+  <div class="grid2"><div class="card"><div class="muted">Estimated yearly cost${S.mult !== 1 ? `, at ${Math.round(S.mult * 100)}% of the care in ${short}` : `, if your care looks like ${short}`}</div><div class="bignum">${usd(b.total)}</div>
     <p>${usd(b.premium)} premiums + ${usd(b.member_cost)} your share of care${b.hsa_offset ? ` - ${usd(b.hsa_offset)} employer HSA money` : ""}. ${second}</p><ul>${who}</ul>${month}${prefNote}</div>
-  <div class="card"><h2>What if...</h2><label>How much care do you expect next year, compared with your claims history? <b id="mult-label">${Math.round(S.mult * 100)}%</b>
+  <div class="card"><h2>What if...</h2>${picker}<label>How much care do you expect next year, compared with ${short}? <b id="mult-label">${Math.round(S.mult * 100)}%</b>
     <input type="range" min="0" max="300" step="5" value="${Math.round(S.mult * 100)}" id="mult"></label>
     <label style="flex-direction:row;align-items:center;gap:8px;margin-top:10px"><input type="checkbox" id="hsa" ${S.hsa ? "checked" : ""}>Count employer HSA money as an offset</label>
     <label style="margin-top:12px">Plans to consider<select data-act="plan-types">${[["all", "Every plan"], ["hsa", "Only plans with an HSA"], ["non_hsa", "Only plans without an HSA"]].map(([v, l]) => `<option value="${v}" ${(S.settings.plan_types || "all") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
@@ -454,35 +471,41 @@ function stepSpending() {
   const s = sp.summary;
   const nameOf = (id) => (S.members.find((m) => m.id === id) || {}).name || id;
   if (!s.claims) return `<h1>Your spending</h1><!--MSG--><p class="lead">Save some claims first, then come back here.</p><div class="row"><button class="btn" data-go="2">Add claims</button></div>`;
+  const n = s.per_year || 1, yr = n > 1 ? " a year" : "", py = n > 1 ? " per year" : "";
+  const cnt = (x) => (n > 1 ? String(Math.round((x / n) * 10) / 10) : String(x));
+  const b = sp.basis || {};
+  const picker = basisPicker(b, "spend-basis", "Which claims to review");
   const maxT = Math.max(...s.by_type.map((t) => t.allowed), 1);
-  const types = s.by_type.map((t) => `<tr><td>${esc(t.label)}</td><td class="n">${t.count}</td><td class="barcell">${bar(t.allowed, maxT)}<span>${usd(t.allowed)}</span></td><td class="n">${usd(t.paid)}</td></tr>`).join("");
-  const people = s.by_person.map((p) => `<tr><td>${esc(p.member)}</td><td class="n">${p.count}</td><td class="n">${usd(p.allowed)}</td><td class="n">${usd(p.paid)}</td></tr>`).join("");
-  const provs = s.by_provider.map((p) => `<tr><td>${esc(p.provider)}<div class="muted small">${esc(p.types)}</div></td><td class="n">${p.count}</td><td class="n">${usd(p.allowed)}</td><td class="n">${usd(p.paid)}</td></tr>`).join("");
+  const types = s.by_type.map((t) => `<tr><td>${esc(t.label)}</td><td class="n">${cnt(t.count)}</td><td class="barcell">${bar(t.allowed, maxT)}<span>${usd(t.allowed)}</span></td><td class="n">${usd(t.paid)}</td></tr>`).join("");
+  const people = s.by_person.map((p) => `<tr><td>${esc(p.member)}</td><td class="n">${cnt(p.count)}</td><td class="n">${usd(p.allowed)}</td><td class="n">${usd(p.paid)}</td></tr>`).join("");
+  const provs = s.by_provider.map((p) => `<tr><td>${esc(p.provider)}<div class="muted small">${esc(p.types)}</div></td><td class="n">${cnt(p.count)}</td><td class="n">${usd(p.allowed)}</td><td class="n">${usd(p.paid)}</td></tr>`).join("");
   const money2 = (n) => (n == null ? "" : "$" + Number(n).toFixed(2));
   const cmp = sp.comparisons.map((c) => {
     const max = Math.max(...c.providers.map((p) => p.avg), 1);
     const fmt = c.per === "per unit" ? money2 : usd;
     return `<div class="card cmp"><div class="row" style="justify-content:space-between;align-items:baseline"><h3>${esc(c.label)}</h3>
-      <span class="save">${c.you_save != null ? `You could have saved about ${usd(c.you_save)}` : `About ${usd(c.care_saving)} less in total care`}</span></div>
+      <span class="save">${c.you_save != null ? `You could have saved about ${usd(c.you_save)}${yr}` : `About ${usd(c.care_saving)} less in total care${yr}`}</span></div>
       <p class="muted small">Compared ${esc(c.basis)}, average allowed ${esc(c.per)}. ${c.visits} ${c.rx ? "fill" : "visit"}${c.visits === 1 ? "" : "s"} in your claims.</p>
       <table class="cmp-t"><tbody>${c.providers.map((p, i) => `<tr class="${i === 0 ? "best" : ""}"><td>${esc(p.provider)}${i === 0 ? ' <span class="chip">Lowest cost you used</span>' : ""}</td>
         <td class="n">${p.visits}x</td><td class="barcell">${bar(p.avg, max)}<span>${fmt(p.avg)}</span></td></tr>`).join("")}</tbody></table>
-      <p class="small">Using ${esc(c.cheapest)} for the same care would have lowered total care by about <b>${usd(c.care_saving)}</b>${c.you_save != null ? ` and your own costs by about <b>${usd(c.you_save)}</b> under ${esc(sp.plan_label)}` : ""}.${c.you_save === 0 ? " Your plan's flat copays meant the price difference didn't reach you this time." : ""}</p></div>`;
+      <p class="small">Using ${esc(c.cheapest)} for the same care would have lowered total care by about <b>${usd(c.care_saving)}</b>${yr}${c.you_save != null ? ` and your own costs by about <b>${usd(c.you_save)}</b>${yr} under ${esc(sp.plan_label)}` : ""}.${c.you_save === 0 ? " Your plan's flat copays meant the price difference didn't reach you this time." : ""}</p></div>`;
   }).join("");
   const er = sp.er ? `<div class="card cmp"><h3>Emergency room or urgent care?</h3>
     <p>Your ${sp.er.er_visits} ER visit${sp.er.er_visits === 1 ? "" : "s"} averaged <b>${usd(sp.er.er_avg)}</b> in total care. Your ${sp.er.urgent_visits} urgent care visit${sp.er.urgent_visits === 1 ? "" : "s"} averaged <b>${usd(sp.er.urgent_avg)}</b>.
-    ${sp.er.you_save_all != null ? `If ${sp.er.er_visits === 1 ? "that visit" : "those visits"} could have been handled at urgent care, you would have paid about <b>${usd(sp.er.you_save_all)}</b> less under ${esc(sp.plan_label)}.` : ""}</p>
+    ${sp.er.you_save_all != null ? `If ${sp.er.er_visits === 1 ? "that visit" : "those visits"} could have been handled at urgent care, you would have paid about <b>${usd(sp.er.you_save_all)}</b> less${yr} under ${esc(sp.plan_label)}.` : ""}</p>
     <p class="muted small">Only you and your doctor know whether the ER was needed. In an emergency, always go to the ER.</p></div>` : "";
-  return `<h1>Your spending</h1><!--MSG--><p class="lead">What your household's care cost from ${esc(s.from)} to ${esc(s.to)}, and where the same kind of care costs less, so you can choose lower-cost care next time.</p>
-  <div class="tiles"><div class="tile"><div class="muted">Total care (allowed)</div><b>${usd(s.allowed)}</b></div><div class="tile"><div class="muted">Your plan paid</div><b>${usd(s.plan_paid)}</b></div>
-    <div class="tile"><div class="muted">You paid</div><b>${usd(s.paid)}</b></div><div class="tile"><div class="muted">Claims</div><b>${s.claims}</b></div></div>
+  const lead = n > 1 ? `An average year of your household's care, from your ${n} full years between ${esc(monthYear(b.from + "-01"))} and ${esc(monthYear(b.to + "-01"))}, and where the same kind of care costs less, so you can choose lower-cost care next time.`
+    : `What your household's care cost from ${esc(monthYear(s.from))} to ${esc(monthYear(s.to))}, and where the same kind of care costs less, so you can choose lower-cost care next time.`;
+  return `<h1>Your spending</h1><!--MSG-->${picker ? `<div class="card basis-card">${picker}</div>` : ""}<p class="lead">${lead}</p>
+  <div class="tiles"><div class="tile"><div class="muted">Total care (allowed)${py}</div><b>${usd(s.allowed)}</b></div><div class="tile"><div class="muted">Your plan paid${py}</div><b>${usd(s.plan_paid)}</b></div>
+    <div class="tile"><div class="muted">You paid${py}</div><b>${usd(s.paid)}</b></div><div class="tile"><div class="muted">Claims${py}</div><b>${cnt(s.claims)}</b></div></div>
   <h2 style="margin-top:28px">Could the same care have cost less?</h2>
   ${cmp || er ? "" : `<div class="card"><p>We didn't find the same kind of care at two different providers in your claims, so there's nothing to compare yet. Comparisons appear when, for example, two urgent care centers, two labs or two pharmacies show up for the same service. Adding a full year of claims helps.</p></div>`}
   ${cmp}${er}
   ${cmp || er ? `<p class="muted small">Visits of the same type can differ in what was done, so treat these as a guide. Comparisons only use providers you've already been to; in-network status isn't checked.${sp.plan_label ? "" : " Pick the plan your claims were processed under on step 2 to see what you personally would have saved."}</p>` : ""}
-  <div class="grid2"><div class="card"><h2>By type of care</h2><table class="sp"><thead><tr><th>Care</th><th class="n">Claims</th><th>Total care</th><th class="n">You paid</th></tr></thead><tbody>${types}</tbody></table></div>
-  <div class="card"><h2>By person</h2><table class="sp"><thead><tr><th>Person</th><th class="n">Claims</th><th class="n">Total care</th><th class="n">You paid</th></tr></thead><tbody>${people}</tbody></table></div></div>
-  <div class="card"><h2>Where your care happened</h2><div class="scroll"><table class="sp"><thead><tr><th>Provider</th><th class="n">Claims</th><th class="n">Total care</th><th class="n">You paid</th></tr></thead><tbody>${provs}</tbody></table></div></div>
+  <div class="grid2"><div class="card"><h2>By type of care${yr}</h2><div class="scroll"><table class="sp"><thead><tr><th>Care</th><th class="n">Claims</th><th>Total care</th><th class="n">You paid</th></tr></thead><tbody>${types}</tbody></table></div></div>
+  <div class="card"><h2>By person${yr}</h2><div class="scroll"><table class="sp"><thead><tr><th>Person</th><th class="n">Claims</th><th class="n">Total care</th><th class="n">You paid</th></tr></thead><tbody>${people}</tbody></table></div></div></div>
+  <div class="card"><h2>Where your care happened${yr}</h2><div class="scroll"><table class="sp"><thead><tr><th>Provider</th><th class="n">Claims</th><th class="n">Total care</th><th class="n">You paid</th></tr></thead><tbody>${provs}</tbody></table></div></div>
   ${FEEDBACK}<div class="row"><button class="btn" data-go="3">Back to your answer</button><button class="btn" data-go="2">Add more claims</button></div>`;
 }
 
@@ -630,7 +653,9 @@ document.addEventListener("click", async (ev) => {
     else if (act === "commit") {
       if (S.review.rows.some((x) => x.check && !x.confirmed && !x.skip)) throw new Error("Confirm or change the highlighted care types first (tick \"Confirm this type\").");
       const r = await post("/api/claims/commit", { rows: S.review.rows });
-      S.saved.claims = r.total; S.review = null; S.spending = null; S.msg = `Saved ${r.saved} claim(s).`; if (r.saved) track("Claims added"); render();
+      S.saved.claims = r.total; S.review = null; S.spending = null; S.msg = `Saved ${r.saved} claim(s).`; if (r.saved) track("Claims added");
+      try { S.span = spanNote((await api("/api/state")).claims); } catch (e) { /* the note is optional */ }
+      render();
     }
     else if (act === "discard") { S.review = null; render(); }
     else if (act === "to-answer") {
@@ -722,6 +747,11 @@ document.addEventListener("change", async (ev) => {
     }
     if (t.dataset.gateHas !== undefined) { const box = t.closest("[data-gate]"); box.querySelector(".gate-amounts").hidden = t.value !== "yes"; return; }
     if (t.dataset.gateNone !== undefined) { t.closest("[data-gate]").querySelectorAll("[data-gate-amt]").forEach((i) => { i.disabled = t.checked; }); return; }
+    if (t.dataset.act === "basis" || t.dataset.act === "spend-basis") {
+      S.settings = { ...S.settings, [t.dataset.act === "basis" ? "basis" : "spend_basis"]: t.value }; await post("/api/settings", S.settings, "PUT");
+      if (t.dataset.act === "basis") { S.analysis = null; S.timeline = null; } else S.spending = null;
+      render(); return;
+    }
     if (t.dataset.act === "plan-types") {
       S.settings = { ...S.settings, plan_types: t.value }; await post("/api/settings", S.settings, "PUT");
       S.analysis = null; S.timeline = null; render(); return;

@@ -1,6 +1,6 @@
 // Month by month: when premiums, your share of care and employer HSA money land through the year.
 // Pure functions (no DOM); runs on the device. The drawing lives in timeline-view.js.
-import { simulate, enumerateConfigs, effectiveCost, analyze, labelConfig } from "./engine.js";
+import { simulate, enumerateConfigs, effectiveCost, analyze, labelConfig, yearSets } from "./engine.js";
 
 export const LONG = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const num = (v) => { const x = Number(v); return v == null || v === "" || Number.isNaN(x) ? 0 : x; };
@@ -48,9 +48,12 @@ export function checksPerMonth(w, perYear) {
 const shortName = (p) => String(p || "Plan").replace(/\s+plan$/i, "").trim() || "Plan";
 
 // Every "everyone on one employer's plan" option, plus the best split when the answer is a split.
-export function buildOptions(household, employers, claims, { mult = 1, countHsa = true, current = null } = {}) {
+// claims: one plan year, or several (an average): each is run on its own and every amount is divided by the
+// number of years, so a month shows that calendar month's average. window: the 12 months to show (optional).
+export function buildOptions(household, employers, claims, { mult = 1, countHsa = true, current = null, window = null } = {}) {
   const members = household.members, name = (id) => (members.find((m) => m.id === id) || {}).name || id;
-  const byId = new Map(claims.map((c) => [c.id, c]));
+  const sets = yearSets(claims), n = sets.length, flat = sets.flat();
+  const byId = new Map(flat.map((c) => [c.id, c]));
   const configs = enumerateConfigs(household, employers);
   const best = analyze(household, employers, claims, mult, countHsa).best;
   const same = (cfg, r) => r && labelConfig(cfg) === r.label && JSON.stringify(cfg.assignment) === JSON.stringify(r.assignment);
@@ -61,16 +64,16 @@ export function buildOptions(household, employers, claims, { mult = 1, countHsa 
     let premium = 0, hsa = 0;
     const lines = [], parts = [];
     for (const p of cfg.parts) {
-      const sim = simulate(p.plan, claims, p.covered, mult);
-      const eff = effectiveCost(p.plan, p.tier, sim.member_cost, countHsa);
+      const sims = sets.map((set) => simulate(p.plan, set, p.covered, mult));
+      const eff = effectiveCost(p.plan, p.tier, sims.reduce((a, x) => a + x.member_cost, 0) / n, countHsa);
       premium += eff.premium; hsa += eff.hsa_offset;
       parts.push({ employer: p.employer_name, plan: p.plan.name || "plan", who: p.covered.map(name), tier: p.tier,
         ded_ind: num(p.plan.deductible_ind), ded_fam: p.plan.deductible_fam == null ? num(p.plan.deductible_ind) : num(p.plan.deductible_fam),
         premium: r2(eff.premium), hsa: r2(eff.hsa_offset) });
-      for (const l of sim.lines) {
+      for (const sim of sims) for (const l of sim.lines) {
         const c = byId.get(l.id) || {};
         lines.push({ date: l.date, who: name(l.member), service: c.service || c.rx_drug || c.provider || "Care", provider: c.provider || "",
-          allowed: l.allowed, cost: l.member_cost, basis: l.basis });
+          allowed: l.allowed / n, cost: l.member_cost / n, basis: n > 1 ? `${l.basis}; ${String(l.date).slice(0, 4)}, counted as 1/${n}` : l.basis });
       }
     }
     lines.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -104,7 +107,7 @@ export function buildOptions(household, employers, claims, { mult = 1, countHsa 
   add(singles.find((o) => !defaults.includes(o.key)));
   const net = (o) => o.premium + o.lines.reduce((a, l) => a + l.cost, 0) - o.hsa;
   for (const o of [...options].sort((a, b) => net(a) - net(b))) add(o);
-  return { window: planWindow(claims), options, defaults };
+  return { window: window || (n > 1 ? { y: Math.max(...flat.map((c) => +String(c.date).slice(0, 4)).filter(Boolean)), m: 0, folded: true } : planWindow(flat)), options, defaults };
 }
 
 // Month-by-month amounts for one option. pay = paychecks a year; hsaTiming = "spread" (each paycheck) or "start" (all in month 1).

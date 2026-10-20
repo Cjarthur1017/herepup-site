@@ -266,3 +266,8 @@ label.pref{align-items:flex-start;padding:8px 0}label.pref input{margin-top:4px}
 .cx select,.cx input{width:100%;min-width:0;max-width:100%}
 .cx .row>label{flex:1 1 200px;min-width:0}
 .cx-or{font-size:16px;margin:16px 0 0}
+/* which year to plan around / which claims to review */
+.basis-pick{max-width:640px}
+.basis-pick select{width:100%;max-width:100%;min-width:0}
+.basis-line{margin:-6px 0 12px;color:var(--ink);font-size:16px}
+.basis-card{padding:14px 20px}

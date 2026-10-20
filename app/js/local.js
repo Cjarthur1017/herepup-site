@@ -4,6 +4,7 @@ import * as E from "./engine.js";
 import * as R from "./readers.js";
 import * as I from "./insights.js";
 import * as T from "./timeline.js";
+import * as Y from "./years.js";
 
 const KEY = "herepup.v1";
 const TIERS = ["ee", "ee_sp", "ee_ch", "family"];
@@ -143,11 +144,13 @@ function calibrateAll(s, employers, usable) {
     const [eid, pi] = key.split(":");
     const plan = (employers.find((e) => e.id === eid) || { plans: [] }).plans[+pi];
     if (!plan) continue;
-    const r = E.calibrate(plan, cl, members);
-    if (!merged) { merged = r; continue; }
-    merged.rows.push(...r.rows);
-    merged.claims_checked += r.claims_checked; merged.flagged += r.flagged;
-    for (const k of ["modeled_total", "actual_total", "total_gap"]) merged[k] = Math.round((merged[k] + r[k]) * 100) / 100;
+    for (const yearClaims of Y.byCalendarYear(cl)) { // each calendar year is its own plan year
+      const r = E.calibrate(plan, yearClaims, members);
+      if (!merged) { merged = r; continue; }
+      merged.rows.push(...r.rows);
+      merged.claims_checked += r.claims_checked; merged.flagged += r.flagged;
+      for (const k of ["modeled_total", "actual_total", "total_gap"]) merged[k] = Math.round((merged[k] + r[k]) * 100) / 100;
+    }
   }
   if (merged && merged.claims_checked) merged.mean_abs_error = Math.round(merged.rows.reduce((a, x) => a + Math.abs(x.diff), 0) / merged.claims_checked * 100) / 100;
   return merged;
@@ -219,30 +222,33 @@ export async function handle(method, path, body, file) {
     const usable = s.claims.filter((c) => c.allowed);
     if (s.claims.length - usable.length) warnings.push(`${s.claims.length - usable.length} claim(s) have no allowed amount and were left out.`);
     if (!usable.length) throw new Error("Add claims with allowed amounts first.");
+    const basis = Y.select(usable, (s.settings || {}).basis); // which year of the history to plan around
+    const use_claims = basis.sets.length > 1 ? basis.sets : basis.sets[0];
     const ids = new Set(s.household.members.map((m) => m.id));
     for (const e of employers) if (!ids.has(e.subscriber)) throw new Error(`Pick the household member who works at ${e.name}.`);
     hsaCheck(employers);
     const pref = planTypes(s), picked = pickPlans(employers, pref);
     if (pref !== "all" && !picked.length) warnings.push(`None of your plan options ${pref === "hsa" ? "come with an HSA" : "are without an HSA"}, so every plan is shown. Change "Plans to consider" if that's not right.`);
     const use = picked.length ? picked : employers;
-    const res = E.analyze(s.household, use, usable, mult, countHsa);
+    const res = E.analyze(s.household, use, use_claims, mult, countHsa);
     res.plan_types = picked.length ? pref : "all";
-    if (res.plan_types !== "all") { const all = E.analyze(s.household, employers, usable, mult, countHsa).best; res.all_best = all ? { label: all.label, total: all.total } : null; }
+    if (res.plan_types !== "all") { const all = E.analyze(s.household, employers, use_claims, mult, countHsa).best; res.all_best = all ? { label: all.label, total: all.total } : null; }
     const unknown = use.flatMap((e) => e.plans.filter((pl) => pl.hsa_unknown).map((pl) => `${e.name}: ${pl.name}`));
     if (unknown.length) {
       const scenarios = [0, 1500, 3000].map((dep) => {
         const emps2 = clone(use);
         for (const e of emps2) for (const pl of e.plans) if (pl.hsa_unknown) pl.hsa_employer = { ee: dep / 3, ee_sp: dep / 3, ee_ch: dep / 3, family: dep };
-        const r2 = E.analyze(s.household, emps2, usable, mult, countHsa);
+        const r2 = E.analyze(s.household, emps2, use_claims, mult, countHsa);
         return { family_deposit: dep, best: r2.best.label, total: r2.best.total };
       });
       res.hsa_sensitivity = { plans: unknown, scenarios };
     }
     res.warnings = warnings;
-    res.break_even = E.breakEven(s.household, use, usable, countHsa);
+    res.break_even = E.breakEven(s.household, use, use_claims, countHsa);
     const cal = calibrateAll(s, employers, usable);
     if (cal) res.calibration = cal;
-    res.claims_used = usable.length;
+    res.claims_used = basis.sets.reduce((a, x) => a + x.length, 0);
+    res.basis = { key: basis.key, label: basis.label, short: basis.short, options: basis.options, years: basis.years, note: basis.note || "" };
     const obs = s.observed;
     if (obs && obs.ded_fam_met) {
       const cutoff = obs.as_of || "9999";
@@ -257,16 +263,25 @@ export async function handle(method, path, body, file) {
     if (!s.household.members.length || !employers.length || !usable.length) return { window: T.planWindow(usable), options: [], defaults: [] };
     const picked = pickPlans(employers, planTypes(s)), cp = s.current_plan || {};
     const current = cp.employer ? ((s.employers.find((e) => e.id === cp.employer) || { plans: [] }).plans[cp.plan_index || 0] || null) : null;
-    return T.buildOptions(s.household, picked.length ? picked : employers, usable, { mult: Number(body.multiplier ?? 1), countHsa: body.count_hsa !== false, current });
+    const basis = Y.select(usable, (s.settings || {}).basis);
+    const out = T.buildOptions(s.household, picked.length ? picked : employers, basis.sets.length > 1 ? basis.sets : basis.sets[0],
+      { mult: Number(body.multiplier ?? 1), countHsa: body.count_hsa !== false, current, window: basis.window });
+    out.basis = { key: basis.key, short: basis.short, note: basis.note || "" };
+    return out;
   }
   if (method === "POST" && p === "/api/spending") {
-    const claims = s.claims.filter((c) => c.allowed);
+    const all = s.claims.filter((c) => c.allowed);
+    const basis = Y.select(all, (s.settings || {}).spend_basis, { forSpending: true }); // which claims to review
+    const claims = basis.sets.flat(), n = basis.sets.length;
     const members = s.household.members;
     const cp = s.current_plan || {};
     const emp = cp.employer ? s.employers.find((e) => e.id === cp.employer) : null;
     const plan = emp ? (emp.plans || [])[cp.plan_index || 0] : null;
-    return { summary: I.summarize(claims, members), comparisons: I.compareProviders(claims, members, plan), er: I.erVsUrgent(claims, members, plan),
+    const out = { summary: I.summarize(claims, members), comparisons: I.compareProviders(claims, members, plan), er: I.erVsUrgent(claims, members, plan),
       plan_label: plan ? `${emp.name}: ${plan.name}` : "" };
+    if (n > 1) I.perYear(out, n); // an average year: every dollar amount divided by the number of years
+    out.basis = { key: basis.key, label: basis.label, short: basis.short, options: basis.options, years: n, from: basis.from, to: basis.to };
+    return out;
   }
   if (method === "DELETE" && p === "/api/data") { try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ } mem = empty(); return { deleted: true }; }
   throw new Error("Not available in the web version.");

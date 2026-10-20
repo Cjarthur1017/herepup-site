@@ -135,11 +135,11 @@ FAQ = [
     ("What do I need to get started?",
      "Each plan option's benefit guide or plan summary (a PDF is fine, even a scanned one), and your recent claims history: the "
      "explanations of benefits (EOBs) or claims spreadsheet you can download from your insurer's member website under Claims, plus "
-     "pharmacy claims if you fill prescriptions. The last 12 months gives the best starting point. Direct insurer connections are in "
+     "pharmacy claims if you fill prescriptions. The last 12 months gives the best starting point; add earlier years to plan around your highest, lowest or average year. Direct insurer connections are in "
      "testing; see insurer connections to request yours.",
      "Each plan option's benefit guide or plan summary (a PDF is fine, even a scanned one), and your recent claims history: the "
      "explanations of benefits (EOBs) or claims spreadsheet you can download from your insurer's member website under Claims, plus "
-     'pharmacy claims if you fill prescriptions. The last 12 months gives the best starting point. Direct insurer connections are in '
+     'pharmacy claims if you fill prescriptions. The last 12 months gives the best starting point; add earlier years to plan around your highest, lowest or average year. Direct insurer connections are in '
      'testing; see <a href="/insurers/">insurer connections</a> to request yours.'),
     ("Can it compare plans from two employers?",
      "Yes. If you and a spouse or partner both have employer coverage, add both benefit guides. HerePup tests every way your household "
@@ -197,7 +197,7 @@ home = f'''
   <h2>How it works</h2>
   <div class="grid4" style="margin:14px 0 18px">
     <div class="card"><div class="num">1</div><h3>Add your plan options</h3><p>Drag in each employer's benefit guide, typed or scanned. HerePup reads the plan options, premiums, deductibles and copays, and you confirm every number.</p></div>
-    <div class="card"><div class="num">2</div><h3>Bring in your claims history</h3><p>Drag in your explanations of benefits and the claim or pharmacy summaries you can download from your insurer's website. The last 12 months works best.</p></div>
+    <div class="card"><div class="num">2</div><h3>Bring in your claims history</h3><p>Drag in your explanations of benefits and the claim or pharmacy summaries you can download from your insurer's website. The last 12 months is the best start; earlier years let you plan around your highest, lowest or average year.</p></div>
     <div class="card"><div class="num">3</div><h3>See what each plan is likely to cost</h3><p>HerePup models how your kind of care would be covered under every plan: which visits get a flat copay and which go to the deductible. See month by month when costs would land and how much to set aside, then adjust for a heavier or lighter year.</p></div>
     <div class="card"><div class="num">4</div><h3>Spend less on the same care</h3><p>See where your money went, and where the same kind of care costs less: one urgent care against another, the same test at two labs, the same drug at two pharmacies.</p></div>
   </div>
@@ -269,7 +269,7 @@ how = '''
 <ol class="steps">
   <li><h3>Tell HerePup who's covered</h3><p>Add each person in your household and whether they're an adult or a child. HerePup uses this to pick the right coverage level for every option: employee only, employee plus spouse, employee plus children, or family.</p></li>
   <li><h3>Add your plan options</h3><p>Drag in each employer's benefit guide or plan summary. Typed and scanned PDFs both work. HerePup reads the premiums for each coverage level, deductibles, out-of-pocket maximums, coinsurance, office, specialist, urgent care and ER copays, prescription tiers and employer HSA contributions. You check and confirm every number. If you and a spouse or partner have different employers, add both.</p></li>
-  <li><h3>Bring in your claims history</h3><p>Drag in your explanations of benefits (EOBs), the claims spreadsheet from your insurer's member website, and your pharmacy claims. The last 12 months is the best starting point. HerePup works out what kind of care each claim was, such as an office visit, a specialist, urgent care, the ER, a procedure or a prescription, and asks you to confirm anything it isn't sure about. Direct connections to insurers are <a href="/insurers/">in testing</a>, and you can request yours.</p></li>
+  <li><h3>Bring in your claims history</h3><p>Drag in your explanations of benefits (EOBs), the claims spreadsheet from your insurer's member website, and your pharmacy claims. The last 12 months is the best starting point; with earlier years too, you can plan around your highest, lowest or average year. HerePup works out what kind of care each claim was, such as an office visit, a specialist, urgent care, the ER, a procedure or a prescription, and asks you to confirm anything it isn't sure about. Direct connections to insurers are <a href="/insurers/">in testing</a>, and you can request yours.</p></li>
   <li><h3>Estimate what every option will cost</h3><p>HerePup models each kind of care in your history under every plan and every way your household could enroll: which visits would be a flat copay and which would go to the deductible, when coinsurance and out-of-pocket maximums kick in, and the total: premiums plus your share of care, minus employer HSA money. When your files include what your insurer actually charged, HerePup checks its model against it.</p></li>
   <li><h3>Adjust for the year ahead</h3><p>Expecting more care, or less? The What if slider models anywhere from no care to three times the care in your history and shows the point where a different plan becomes the better choice, so you can pick a plan that holds up for the year you expect.</p></li>
   <li><h3>See it month by month</h3><p>A low-deductible plan spreads its cost evenly through premiums; a high-deductible plan costs less up front but can bring big bills in the months you need care. The month-by-month view shows when each plan's costs are likely to land, and how much to set aside for the expensive months.</p></li>

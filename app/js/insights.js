@@ -73,6 +73,26 @@ export function summarize(claims, members) {
     by_type: fix(byType), by_person: fix(byPerson), by_provider: fix(byProvider).slice(0, 10) };
 }
 
+// Re-running real history under a plan: each calendar year is its own plan year (deductibles reset in January).
+function costByYear(plan, claims, ids) {
+  const g = new Map();
+  for (const c of claims) { const y = String(c.date || "").slice(0, 4); if (!g.has(y)) g.set(y, []); g.get(y).push(c); }
+  let t = 0; for (const set of g.values()) t += simulate(plan, set, ids, 1).member_cost;
+  return t;
+}
+
+// An average year: every dollar amount (and count) in a spending review divided by the number of years.
+export function perYear(out, n) {
+  const d = (x) => (x == null ? x : r2(x / n));
+  const s = out.summary;
+  for (const k of ["allowed", "paid", "plan_paid"]) s[k] = d(s[k]);
+  for (const list of [s.by_type, s.by_person, s.by_provider]) for (const x of list) { x.allowed = d(x.allowed); x.paid = d(x.paid); }
+  s.per_year = n;
+  for (const c of out.comparisons) { c.care_saving = d(c.care_saving); c.you_save = d(c.you_save); }
+  if (out.er) out.er.you_save_all = d(out.er.you_save_all);
+  return out;
+}
+
 // For each like-for-like group seen at 2+ providers: what would the same care have cost at the lowest-cost one?
 // plan (optional): re-run the year under it to estimate what you personally would have saved.
 export function compareProviders(claims, members, plan = null) {
@@ -80,7 +100,7 @@ export function compareProviders(claims, members, plan = null) {
   const groups = new Map();
   for (const v of vs) { const g = groups.get(v.lk.key) || { lk: v.lk, visits: [] }; g.visits.push(v); groups.set(v.lk.key, g); }
   const ids = members.map((m) => m.id);
-  const baseline = plan ? simulate(plan, claims, ids, 1).member_cost : null;
+  const baseline = plan ? costByYear(plan, claims, ids) : null;
   const results = [];
   for (const g of groups.values()) {
     const isRx = g.lk.key.startsWith("rx|");
@@ -106,7 +126,7 @@ export function compareProviders(claims, members, plan = null) {
     let youSave = null;
     if (plan && scaled.size) {
       const alt = claims.map((c) => (scaled.has(c.id) ? { ...c, allowed: num(c.allowed) * scaled.get(c.id) } : c));
-      youSave = r2(baseline - simulate(plan, alt, ids, 1).member_cost);
+      youSave = r2(baseline - costByYear(plan, alt, ids));
     }
     if (careSaving < 1) continue;
     results.push({ key: g.lk.key, label: g.lk.label, basis: g.lk.basis, rx: isRx, per: isRx && g.visits.every((v) => v.qty) ? "per unit" : "per visit",
@@ -130,7 +150,7 @@ export function erVsUrgent(claims, members, plan = null) {
     const ids = members.map((m) => m.id), f = new Map();
     for (const v of er) for (const c of v.claims) f.set(c.id, ucAvg / v.allowed);
     const alt = claims.map((c) => (f.has(c.id) ? { ...c, allowed: num(c.allowed) * f.get(c.id), category: "urgent" } : c));
-    youSave = r2(simulate(plan, claims, ids, 1).member_cost - simulate(plan, alt, ids, 1).member_cost);
+    youSave = r2(costByYear(plan, claims, ids) - costByYear(plan, alt, ids));
   }
   return { er_visits: er.length, er_avg: r2(erAvg), urgent_visits: uc.length, urgent_avg: r2(ucAvg), per_visit_gap: r2(erAvg - ucAvg), you_save_all: youSave };
 }
