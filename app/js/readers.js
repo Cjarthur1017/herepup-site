@@ -223,11 +223,13 @@ function ocr(pngBytes) {
 export async function pdfPages(file, onProgress = () => {}, stopWhen = null) {
   const lib = await loadPdfJs();
   const doc = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false }).promise;
-  const pages = [], blank = [];
+  const pages = [], blank = [], layout = [];
   for (let i = 1; i <= doc.numPages; i++) {
     const pg = await doc.getPage(i);
-    const t = linesFromContent((await pg.getTextContent()).items);
+    const items = (await pg.getTextContent()).items;
+    const t = linesFromContent(items);
     pages.push(t);
+    layout.push(items.filter((it) => it.str && it.str.trim()).map((it) => ({ s: it.str, x: it.transform[4], y: it.transform[5], w: it.width })));
     if (t.replace(/\s/g, "").length < 40) blank.push(i);
   }
   let done = 0, err = "", stoppedEarly = 0;
@@ -243,11 +245,11 @@ export async function pdfPages(file, onProgress = () => {}, stopWhen = null) {
       await pg.render({ canvasContext: ctx, viewport: vp }).promise;
       const blob = await new Promise((res) => canvas.toBlob(res, "image/png"));
       const text = await ocr(new Uint8Array(await blob.arrayBuffer()));
-      if (text.trim()) { pages[i - 1] = text; done++; }
+      if (text.trim()) { pages[i - 1] = text; layout[i - 1] = null; done++; }
     } catch (e) { err = e.message; break; }
   }
   await doc.destroy();
-  return { pages, scanned_pages: blank.length, ocr_pages: done, unreadable_pages: blank.length - done - stoppedEarly, skipped_pages: stoppedEarly, ocr_error: err };
+  return { pages, layout, scanned_pages: blank.length, ocr_pages: done, unreadable_pages: blank.length - done - stoppedEarly, skipped_pages: stoppedEarly, ocr_error: err };
 }
 
 // ------------------------------------------------------------------ Cigna EOB
@@ -402,7 +404,55 @@ export function employerGuess(pages, filename = "") {
   return stem ? stem.split(/[_\- ]?benefit/i)[0].replace(/^[\s_-]+|[\s_-]+$/g, "").replace(/_/g, " ") : "";
 }
 
-export function detectPlans(pages, filename = "") {
+// Services rows of a comparison table read by position, so wrapped cells ("$20 copay (primary)" over "$30 copay
+// (specialist)") stay with their plan's column. Returns per plan: copays, whether they apply after the deductible,
+// the in-network coinsurance from a "You pay 20% after deductible" cell, or a "then 15%" rate after a copay.
+function servicesByColumn(items, names) {
+  if (!items || !items.length) return null;
+  const hdr = names.map((nm) => items.find((it) => it.s.trim() === nm) || items.find((it) => it.s.includes(nm)));
+  if (hdr.some((h) => !h)) return null;
+  const ctr = hdr.map((h) => h.x + h.w / 2);
+  if (ctr.some((c, i) => i && c <= ctr[i - 1])) return null;
+  const labelMax = ctr[0] - (ctr.length > 1 ? (ctr[1] - ctr[0]) / 2 : 60);
+  const below = items.filter((it) => it.y < Math.min(...hdr.map((h) => h.y)) - 2);
+  const labels = [];
+  for (const it of below.filter((i) => i.x + i.w / 2 < labelMax).sort((a, b) => b.y - a.y)) {
+    const prev = labels[labels.length - 1];
+    if (prev && prev.y - it.y < 9) prev.s += " " + it.s; else labels.push({ y: it.y, s: it.s });
+  }
+  const out = names.map(() => ({ copays: {}, after: false, coins: null, then: null }));
+  let seen = false;
+  labels.forEach((lb, li) => {
+    const key = (COPAY_ROWS.find(([, re]) => re.test(lb.s.trim())) || [])[0];
+    if (!key) return;
+    const top = li ? (labels[li - 1].y + lb.y) / 2 : lb.y + 12;
+    const bot = li < labels.length - 1 ? (lb.y + labels[li + 1].y) / 2 : lb.y - (top - lb.y);
+    const cells = [];
+    for (const it of below.filter((i) => i.y < top && i.y >= bot && i.x + i.w / 2 >= labelMax).sort((a, b) => b.y - a.y || a.x - b.x)) {
+      const c = it.x + it.w / 2;
+      const cell = cells.find((k) => Math.abs(k.c - c) < 25);
+      if (cell) cell.s += " " + it.s; else cells.push({ c, s: it.s });
+    }
+    names.forEach((_, k) => {
+      const mine = cells.filter((cl) => ctr.reduce((b, x, j) => (Math.abs(x - cl.c) < Math.abs(ctr[b] - cl.c) ? j : b), 0) === k).sort((a, b) => a.c - b.c);
+      if (!mine.length) return;
+      const s = mine[0].s.replace(/\s+/g, " "), o = out[k];
+      seen = true;
+      for (const m of s.matchAll(/\$\s?(\d[\d,]*)(?:\.\d\d)?\s*co-?pay(?:ment)?\s*(?:\(([^)]*)\))?/gi)) {
+        const k2 = /specialist/i.test(m[2] || "") ? "specialist" : key;
+        if (o.copays[k2] == null) o.copays[k2] = Number(m[1].replace(/,/g, ""));
+        if (/after\s+(?:the\s+)?deductible/i.test(s)) o.after = true;
+      }
+      const then = s.match(/then\s+(\d{1,2})\s?%/i);
+      if (then && o.then == null) o.then = +then[1] / 100;
+      const pc = s.match(/(\d{1,2})\s?%\s+(?:coinsurance\s+)?after/i);
+      if (pc && !/co-?pay/i.test(s) && o.coins == null && (key === "office" || key === "specialist")) o.coins = +pc[1] / 100;
+    });
+  });
+  return seen ? out : null;
+}
+
+export function detectPlans(pages, filename = "", layout = null) {
   const notes = [];
   let best = null;
   pages.forEach((text, pi) => {
@@ -463,8 +513,15 @@ export function detectPlans(pages, filename = "") {
   if (best.cols) notes.push("The plan table has separate in- and out-of-network columns; HerePup used the in-network amounts.");
   // Coinsurance from a "You pay 20% after deductible" row; with in/out columns, percentages line up with the rightmost columns
   // (a plan without that row, like a copay plan, leaves its cell blank or worded).
+  let pos = null;
+  if (layout) for (const k of [pi, pi + 1]) { pos = servicesByColumn(layout[k], names); if (pos) break; }
+  if (pos) pos.forEach((r, i) => {
+    if (r.coins != null) plans[i].coinsurance = r.coins;
+    else if (r.then != null) { plans[i].coinsurance = r.then; plans[i].flags.push(`Coinsurance of ${Math.round(r.then * 100)}% was taken from a "copay, then ${Math.round(r.then * 100)}%" row; the guide doesn't state this plan's general coinsurance. Check it.`); }
+    else plans[i].flags.push("Coinsurance for this plan wasn't found in the comparison table; 20% is assumed. Check it.");
+  });
   const C = best.cols ? best.cols.length : n;
-  for (const l of [...lines, ...(pages[pi + 1] || "").split("\n").map((x) => x.trim())]) {
+  if (!pos) for (const l of [...lines, ...(pages[pi + 1] || "").split("\n").map((x) => x.trim())]) {
     const pc = [...l.matchAll(/(\d{1,2})\s?%\s+(?:coinsurance\s+)?after\b/gi)].map((m) => +m[1] / 100);
     if (pc.length < 2 || pc.length > C || (!best.cols && pc.length !== n)) continue;
     const hit = [];
@@ -490,6 +547,9 @@ export function detectPlans(pages, filename = "") {
       }
     }
   }
+  if (pos) pos.forEach((r, i) => {
+    for (const [k, v] of Object.entries(r.copays)) if (plans[i].copays[k] == null) { plans[i].copays[k] = v; got[i]++; if (r.after) after[i]++; }
+  });
   plans.forEach((p, i) => {
     p.copay_after_ded = !!(got[i] && after[i] * 2 >= got[i]);
     if (!got[i]) p.flags.push("No flat copays found for visits. The plan is modeled as deductible then coinsurance.");

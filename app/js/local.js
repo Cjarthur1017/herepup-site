@@ -81,7 +81,7 @@ export async function upload(file, kind, order = null, onProgress = () => {}) {
   if (kind === "unknown") throw new Error(`${file.name} isn't a file type HerePup reads. Use PDF, CSV, Excel (.xlsx) or FHIR JSON.`);
   if (kind === "plan") {
     const doc = await readDoc(file, onProgress, guideComplete);
-    const det = R.detectPlans(doc.pages, file.name);
+    const det = R.detectPlans(doc.pages, file.name, doc.layout);
     if (doc.skipped_pages) det.notes.push(`This guide is scanned. HerePup stopped reading after it found every plan detail; the last ${doc.skipped_pages} page(s) were not needed.`);
     let message = "";
     if (!det.plans.length && R.parseCignaEob(doc.pages).rows.length) message = `${file.name} looks like an explanation of benefits, not a benefit guide. Add it on the Claims step.`;
