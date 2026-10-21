@@ -752,6 +752,8 @@ export function detectPlans(pages, filename = "", layout = null) {
           tobacco_help: "" };
         notes.push(`Premiums depend on ${[bands && "pay band", twin && "tobacco use"].filter(Boolean).join(" and ")}. HerePup will ask on the plan screen; until then it uses the ${bands ? `first band (${bands[0]})` : ""}${bands && twin ? " and " : ""}${twin ? "tobacco-free rates" : ""}.`);
       }
+      if (blocks.length > 1 && !bands) notes.push(`The premium table repeats ${blocks.length} times (perhaps by pay level or location), but HerePup couldn't tell what each version is for. It used the first one; check that those premiums are yours.`);
+      if (!twin && /tobacco|smoker|nicotine/i.test(pages.join(" ")) && /surcharge/i.test(pages.join(" "))) notes.push("The guide mentions a tobacco surcharge. If anyone covered uses tobacco, add the surcharge to the premiums.");
       const raw0 = blocks[0];
       if (raw0.ee_child && raw0.ee_children) notes.push("The guide prices one child and two or more children separately; HerePup used the children rate for employee + children.");
       if (raw0.ee_sp_ch && raw0.family) notes.push("The guide has a separate employee + spouse + one child rate; HerePup's family rate uses the full family level.");
