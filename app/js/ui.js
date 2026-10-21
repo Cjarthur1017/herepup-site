@@ -6,18 +6,20 @@ import { quickFacts } from "./timeline.js";
 import { mountTimeline } from "./timeline-view.js";
 import * as CX from "./connect.js";
 import { history as claimHistory } from "./years.js";
+import * as B from "./bills.js";
+import { pdfPages } from "./readers.js";
 const CX_TEST = CX.testMode(); // direct insurer connections, in testing: /app/?connect=test
 const cxCheck = {};
 const STEPS = ["Household", "Plan documents", "Claims", "Your answer", "Your spending"];
 const TIERS = [["ee", "Employee only"], ["ee_sp", "Employee + spouse"], ["ee_ch", "Employee + children"], ["family", "Family"]];
 const TIER_WORDS = { ee: "employee only", ee_sp: "employee + spouse", ee_ch: "employee + children", family: "family" };
-const S = { step: 0, members: [], employers: [], currentPlan: "", saved: { claims: 0 }, review: null, hints: {}, detected: [], preview: null, settings: {}, drag: "", insurer: "", spending: null, busy: "", analysis: null, timeline: null, answerTab: "year", hsaGate: false, mult: 1, hsa: true, msg: "", err: "" };
+const S = { step: 0, members: [], employers: [], currentPlan: "", saved: { claims: 0 }, review: null, hints: {}, detected: [], preview: null, settings: {}, drag: "", insurer: "", spending: null, busy: "", analysis: null, timeline: null, answerTab: "year", spendTab: "spend", billForm: { estimate: { selfPay: "yes" }, surprise: { kind: "emergency" }, md: { er: "no", told: "unsure", signed: "unsure" }, cash: { meetDed: "no" } }, billRes: {}, billTool: "", billNoticed: null, billChecks: null, billAmounts: {}, hsaGate: false, mult: 1, hsa: true, msg: "", err: "" };
 const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const usd = (n) => (n == null ? "" : (n < 0 ? "-$" : "$") + Math.abs(Math.round(n)).toLocaleString("en-US"));
 const uid = () => Math.random().toString(36).slice(2, 8);
 // Anonymous step counts (see /privacy/#usage): only the step's name is sent, once per page load. Never any data.
-const STEP_EVENTS = new Set(["Plan added", "Claims added", "Answer shown", "Month by month opened", "Feedback clicked"]);
+const STEP_EVENTS = new Set(["Plan added", "Claims added", "Answer shown", "Month by month opened", "Feedback clicked", "Check a bill opened", "Bill checked"]);
 const tracked = new Set();
 function track(name) {
   if (!STEP_EVENTS.has(name) || tracked.has(name)) return;
@@ -34,6 +36,8 @@ function openFeedback() {
   const first = f.querySelector("input[type=radio]"); if (first) first.focus();
 }
 document.addEventListener("click", (ev) => {
+  const sm = ev.target.closest && ev.target.closest("details.bill-tool > summary");
+  if (sm) { const det = sm.parentElement; S.billTool = det.open ? "" : det.dataset.tool; }
   const c = ev.target.closest && ev.target.closest("[data-close-dialog]");
   if (c) { const d = c.closest("dialog"); if (d && d.close) d.close(); else if (d) d.removeAttribute("open"); }
 });
@@ -101,7 +105,8 @@ function render() {
   main.innerHTML = [stepHousehold, stepPlans, stepClaims, stepAnswer, stepSpending][S.step]() .replace("<!--MSG-->", msg);
   if (S.step === 3 && !S.analysis) runAnalysis();
   if (S.step === 3 && S.analysis && S.answerTab === "month" && S.timeline) mountTimeline($("#timeline"), S.timeline, { mult: S.mult, countHsa: S.hsa });
-  if (S.step === 4 && !S.spending) runSpending();
+  if (S.step === 4 && !S.spending && S.spendTab !== "bills") runSpending();
+  if (S.step === 4 && S.spendTab === "bills" && !S.billNoticed && !S.billLoading) { S.billLoading = true; loadBillData().finally(() => { S.billLoading = false; }); }
 }
 
 function stepHousehold() {
@@ -524,12 +529,121 @@ function stepAnswer() {
 
 function bar(v, max) { return `<span class="bar-h" style="width:${max ? Math.max(2, Math.round((v / max) * 100)) : 0}%"></span>`; }
 
+// ------------------------------------------------------------------ Check a bill (tab on Your spending)
+const BILL_TOOLS = [
+  ["estimate", "Bill higher than the estimate?", "Compare a provider's good faith estimate with its bill. Self-pay patients can dispute a bill $400 or more over the estimate."],
+  ["surprise", "Billed more than your insurer says you owe?", "For emergency care, out-of-network doctors at in-network hospitals and air ambulances, you only owe your in-network share."],
+  ["md", "Maryland hospital facility fee", "Maryland hospitals can't charge an outpatient facility fee unless they told you about it when you booked."],
+  ["cash", "Pay cash or use insurance?", "See what a cash price costs compared with running the care through your plan."],
+];
+const bf = (tool, k) => ((S.billForm[tool] || {})[k] ?? "");
+function bfInput(tool, k, label, type = "text", extra = "") {
+  return `<label>${label}<input type="${type}" ${type === "number" ? 'min="0" step="any" inputmode="decimal"' : ""} data-bf="${tool}.${k}" value="${esc(bf(tool, k))}" ${extra}></label>`;
+}
+function bfSelect(tool, k, label, opts) {
+  return `<label>${label}<select data-bf="${tool}.${k}">${opts.map(([v, t]) => `<option value="${v}" ${String(bf(tool, k)) === v ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></label>`;
+}
+function billResult(tool) {
+  const r = (S.billRes || {})[tool];
+  if (!r) return "";
+  if (r.error) return `<div class="err" role="alert">${esc(r.error)}</div>`;
+  const good = ["ok", "noticed", "excluded", "not-covered"].includes(r.status) || (tool === "cash");
+  const d = S.billForm[tool] || {};
+  const kind = tool === "estimate" ? "estimate" : tool === "surprise" ? "surprise" : tool === "md" ? "md" : "";
+  const showLetter = (tool === "estimate" && r.diff > 0) || (tool === "surprise" && r.status === "surprise") || (tool === "md" && r.status === "no-notice");
+  const text = showLetter ? B.letter(kind, d, r) : "";
+  const links = tool === "estimate" && r.status === "dispute" ? `<p><a href="${B.LINKS.ppdr}" target="_blank" rel="noopener">Start a dispute on CMS's site</a></p>`
+    : tool === "surprise" && r.status !== "ok" ? `<p><a href="${B.LINKS.nsa}" target="_blank" rel="noopener">No Surprises Help Desk and complaint form</a> · ${B.HELP_DESK}</p>`
+    : tool === "md" && r.status === "no-notice" ? `<p><a href="${B.LINKS.hscrc}" target="_blank" rel="noopener">Maryland HSCRC consumer complaints</a></p>` : "";
+  return `<div class="bill-res ${good ? "ok-box" : "warn"}" role="status"><b>${esc(r.headline)}</b><ul>${(r.points || []).map((p) => `<li>${esc(p)}</li>`).join("")}</ul>${links}</div>
+    ${text ? `<label class="letter">Letter to send (fill in the parts in [brackets])<textarea readonly rows="12" id="letter-${tool}">${esc(text)}</textarea></label>
+    <div class="row"><button class="btn small" data-act="bill-copy" data-tool="${tool}">Copy letter</button><button class="btn small" data-act="bill-download" data-tool="${tool}">Download letter</button>
+    ${tool !== "cash" ? `<button class="btn small" data-act="bill-save" data-tool="${tool}">Save to my checks</button>` : ""}</div>` : (tool !== "cash" && !good ? `<div class="row"><button class="btn small" data-act="bill-save" data-tool="${tool}">Save to my checks</button></div>` : "")}`;
+}
+function billForm(tool) {
+  const plans = S.employers.flatMap((e, ei) => e.plans.map((p, pi) => [`${ei}:${pi}`, `${e.name}: ${p.name}`]));
+  const pdf = (which) => `<label class="small muted">Read the amount from the ${which} (PDF)<input type="file" accept=".pdf,application/pdf" data-act="bill-pdf" data-tool="${tool}" data-which="${which}"></label>`;
+  const chips = (which) => ((S.billAmounts || {})[`${tool}:${which}`] || []).map((a) => `<button type="button" class="chip" data-act="bill-amt" data-tool="${tool}" data-k="${which}" data-v="${a.value}">${esc(a.label)}: ${usd(a.value)}</button>`).join("");
+  if (tool === "estimate") return `<div class="row">${bfInput(tool, "provider", "Provider")}${bfInput(tool, "date", "Date of care", "date")}
+      ${bfSelect(tool, "selfPay", "How was this paid?", [["yes", "I paid myself (no insurance, or chose not to use it)"], ["no", "My insurance was billed"]])}</div>
+    <div class="row">${bfInput(tool, "estimate", "Estimate total from this provider ($)", "number")}${bfInput(tool, "billed", "Bill total from this provider ($)", "number")}${bfInput(tool, "firstBill", "Date of the first bill with the higher amount", "date")}</div>
+    <div class="row">${pdf("estimate")}${pdf("bill")}</div><div class="chips">${chips("estimate")}${chips("billed")}</div>`;
+  if (tool === "surprise") {
+    const nq = S.billNoticed ? S.billNoticed.surprise : [];
+    return `${nq.length ? `<div class="row">${bfSelect(tool, "claim", "Pick a claim (optional)", [["", "Enter it myself"], ...nq.map((c) => [c.id, `${c.date} · ${c.provider || "provider"} · ${c.why}`])])}</div>` : ""}
+    <div class="row">${bfInput(tool, "provider", "Provider billing you")}${bfInput(tool, "date", "Date of care", "date")}
+      ${bfSelect(tool, "kind", "What kind of care?", [["emergency", "Emergency care (ER, or care after an emergency)"], ["facility-ancillary", "Anesthesia, radiology, lab, pathology or a hospitalist at an in-network hospital or surgery center"], ["facility-other", "Other out-of-network doctor at an in-network hospital or surgery center"], ["air", "Air ambulance"], ["other", "Something else (ground ambulance, an out-of-network office visit...)"]])}</div>
+    <div class="row">${bfInput(tool, "owed", "What your insurer says you owe ($)", "number")}${bfInput(tool, "billed", "What the provider is billing you ($)", "number")}
+      ${bf(tool, "kind") === "facility-other" ? bfSelect(tool, "waived", "Did you sign a form giving up your protections?", [["no", "No / not sure"], ["yes", "Yes"]]) : ""}</div>
+    <p class="muted small">"What your insurer says you owe" is the patient responsibility on your explanation of benefits (EOB).</p>`;
+  }
+  if (tool === "md") {
+    const nq = S.billNoticed ? S.billNoticed.md : [];
+    return `${nq.length ? `<div class="row">${bfSelect(tool, "claim", "Pick a Maryland hospital visit (optional)", [["", "Enter it myself"], ...nq.map((c) => [c.id, `${c.date} · ${c.provider || "hospital"}`])])}</div>` : ""}
+    <div class="row">${bfInput(tool, "provider", "Hospital")}${bfInput(tool, "date", "Date of visit", "date")}${bfSelect(tool, "er", "Was this the emergency room?", [["no", "No, a clinic or outpatient visit"], ["yes", "Yes"]])}</div>
+    <div class="row">${bfInput(tool, "fee", "Facility fee on the bill ($)", "number")}
+      ${bfSelect(tool, "told", "When you booked, were you told about a facility fee (and sent it in writing)?", [["unsure", "Not sure"], ["yes", "Yes"], ["no", "No"]])}
+      ${bfSelect(tool, "signed", "Did you sign an acknowledgment before the visit?", [["unsure", "Not sure"], ["yes", "Yes"], ["no", "No"]])}
+      ${bfInput(tool, "noticed", "Fee or estimate given in the notice ($, if any)", "number")}</div>`;
+  }
+  return `<div class="row">${plans.length ? bfSelect(tool, "plan", "Your plan", [["", "Enter my plan's numbers myself"], ...plans]) : ""}
+      ${bfInput(tool, "cash", "Cash price ($)", "number")}${bfInput(tool, "price", "Price with insurance: in-network or allowed amount ($)", "number")}</div>
+    <div class="row">${bfInput(tool, "dedLeft", "Deductible left this year ($)", "number")}${bfInput(tool, "coins", "Your coinsurance (%)", "number")}${bfInput(tool, "copay", "Copay for this care, if any ($)", "number")}
+      ${bfSelect(tool, "meetDed", "Will you meet your deductible this year anyway?", [["no", "No / not sure"], ["yes", "Yes"]])}</div>
+    <p class="muted small">The price with insurance is on your insurer's cost estimator or a past explanation of benefits for the same care. Picking your plan fills in its deductible and coinsurance; adjust the deductible for what you've already paid this year.</p>`;
+}
+function billsTab() {
+  const nq = S.billNoticed;
+  const noticedRows = nq ? [...nq.surprise.map((c) => ({ ...c, tool: "surprise", what: c.why })), ...nq.md.map((c) => ({ ...c, tool: "md", what: "Maryland hospital outpatient visit" }))] : [];
+  const noticedCard = noticedRows.length ? `<div class="card"><h2>From your saved claims</h2><p class="muted">These claims are the kinds the rules below protect. Check any that came with a bill.</p>
+    <ul class="noticed">${noticedRows.map((c) => `<li><div><b>${esc(c.provider || "Provider")}</b><div class="muted small">${esc(c.date)} · ${esc(c.what)}${c.owed == null ? "" : ` · insurer says you owe ${usd(c.owed)}`}</div></div>
+      <button class="btn small" data-act="bill-prefill" data-tool="${c.tool}" data-id="${esc(c.id)}">Check this bill</button></li>`).join("")}</ul></div>` : "";
+  const tools = BILL_TOOLS.map(([id, title, blurb]) => `<details class="card bill-tool" ${S.billTool === id ? "open" : ""} data-tool="${id}"><summary><b>${esc(title)}</b><span class="muted">${esc(blurb)}</span></summary>
+      <div class="bill-body">${billForm(id)}<div class="row"><button class="btn primary" data-act="bill-run" data-tool="${id}">Check</button></div>${billResult(id)}</div></details>`).join("");
+  const saved = (S.billChecks || []).map((c, i) => {
+    const left = c.deadline ? Math.round((Date.parse(c.deadline + "T12:00:00Z") - Date.now()) / 86400000) : null;
+    return `<tr><td>${esc(c.created)}</td><td>${esc(c.provider || "")}</td><td>${esc(c.headline)}</td><td>${c.deadline ? `${esc(c.deadline)}${left != null ? ` <span class="${left < 15 ? "chip warn-chip" : "chip"}">${left >= 0 ? `${left} days left` : "passed"}</span>` : ""}` : ""}</td>
+      <td><button class="btn small" data-act="bill-unsave" data-i="${i}">Remove</button></td></tr>`; }).join("");
+  return `<p class="lead">Check a medical bill against the rules that protect you. Everything you enter stays in this browser.</p>
+    ${noticedCard}${tools}
+    ${saved ? `<div class="card"><h2>Your saved checks</h2><div class="scroll"><table><thead><tr><th>Saved</th><th>Provider</th><th>Result</th><th>Deadline</th><th></th></tr></thead><tbody>${saved}</tbody></table></div></div>` : ""}
+    <p class="muted small">These checks explain federal and Maryland rules in plain language; they aren't legal advice. Other states have their own protections, so your state's insurance department can help too.</p>`;
+}
+async function loadBillData() {
+  try { const st = await api("/api/state"); S.billNoticed = B.noticed(st.claims); S.billClaims = st.claims; S.billChecks = st.bill_checks || []; }
+  catch (e) { S.billNoticed = { surprise: [], md: [] }; S.billChecks = []; }
+  render();
+}
+function runBill(tool) {
+  const d = S.billForm[tool] || {};
+  const r = tool === "estimate" ? B.estimateCheck(d) : tool === "surprise" ? B.surpriseCheck(d) : tool === "md" ? B.mdFeeCheck(d) : B.cashOrInsurance(d);
+  S.billRes = { ...(S.billRes || {}), [tool]: r };
+}
+function prefillBill(tool, id) {
+  const c = (S.billClaims || []).find((x) => x.id === id); if (!c) return;
+  const f = (S.billForm[tool] = { ...(S.billForm[tool] || {}), claim: id, provider: c.provider || "", date: c.date || "" });
+  if (tool === "surprise") { const n = (S.billNoticed.surprise.find((x) => x.id === id) || {}); f.kind = n.kind || "emergency"; if (c.member_resp != null) f.owed = c.member_resp; }
+  if (tool === "md") { f.er = "no"; }
+  S.billTool = tool; S.billRes = { ...(S.billRes || {}), [tool]: null };
+}
+function prefillPlan(key) {
+  const [ei, pi] = String(key).split(":").map(Number), p = S.employers[ei] && S.employers[ei].plans[pi];
+  if (!p) return;
+  Object.assign(S.billForm.cash, { dedLeft: p.deductible_ind ?? "", coins: Math.round((p.coinsurance ?? 0.2) * 100), copayAfterDed: p.copay_after_ded ? "yes" : "no" });
+}
+
+function spendTabs() {
+  const tab = (id, label) => `<button role="tab" id="stab-${id}" aria-selected="${S.spendTab === id}" aria-controls="spend-panel" tabindex="${S.spendTab === id ? 0 : -1}" data-act="spend-tab" data-tab="${id}">${label}</button>`;
+  return `<div class="tl-tabs" role="tablist" aria-label="Your spending views">${tab("spend", "Your spending")}${tab("bills", 'Check a bill <span class="tl-new">New</span>')}</div>`;
+}
 function stepSpending() {
+  if (S.spendTab === "bills") return `<h1>Check a bill</h1><!--MSG-->${spendTabs()}<div id="spend-panel" role="tabpanel" aria-labelledby="stab-bills">${S.billNoticed ? billsTab() : `<p class="lead">Loading...</p>`}</div>
+    ${FEEDBACK}<div class="row"><button class="btn" data-go="3">Back to your answer</button></div>`;
   const sp = S.spending;
-  if (!sp) return `<h1>Your spending</h1><!--MSG--><p class="lead">Adding up your claims...</p>`;
+  if (!sp) return `<h1>Your spending</h1><!--MSG-->${spendTabs()}<p class="lead">Adding up your claims...</p>`;
   const s = sp.summary;
   const nameOf = (id) => (S.members.find((m) => m.id === id) || {}).name || id;
-  if (!s.claims) return `<h1>Your spending</h1><!--MSG--><p class="lead">Save some claims first, then come back here.</p><div class="row"><button class="btn" data-go="2">Add claims</button></div>`;
+  if (!s.claims) return `<h1>Your spending</h1><!--MSG-->${spendTabs()}<p class="lead">Save some claims first, then come back here. You can still check a bill on the other tab.</p><div class="row"><button class="btn" data-go="2">Add claims</button></div>`;
   const n = s.per_year || 1, yr = n > 1 ? " a year" : "", py = n > 1 ? " per year" : "";
   const cnt = (x) => (n > 1 ? String(Math.round((x / n) * 10) / 10) : String(x));
   const b = sp.basis || {};
@@ -555,7 +669,7 @@ function stepSpending() {
     <p class="muted small">Only you and your doctor know whether the ER was needed. In an emergency, always go to the ER.</p></div>` : "";
   const lead = n > 1 ? `An average year of your household's care, from your ${n} full years between ${esc(monthYear(b.from + "-01"))} and ${esc(monthYear(b.to + "-01"))}, and where the same kind of care costs less, so you can choose lower-cost care next time.`
     : `What your household's care cost from ${esc(monthYear(s.from))} to ${esc(monthYear(s.to))}, and where the same kind of care costs less, so you can choose lower-cost care next time.`;
-  return `<h1>Your spending</h1><!--MSG-->${picker ? `<div class="card basis-card">${picker}</div>` : ""}<p class="lead">${lead}</p>
+  return `<h1>Your spending</h1><!--MSG-->${spendTabs()}${picker ? `<div class="card basis-card">${picker}</div>` : ""}<p class="lead">${lead}</p>
   <div class="tiles"><div class="tile"><div class="muted">Total care (allowed)${py}</div><b>${usd(s.allowed)}</b></div><div class="tile"><div class="muted">Your plan paid${py}</div><b>${usd(s.plan_paid)}</b></div>
     <div class="tile"><div class="muted">You paid${py}</div><b>${usd(s.paid)}</b></div><div class="tile"><div class="muted">Claims${py}</div><b>${cnt(s.claims)}</b></div></div>
   <h2 style="margin-top:28px">Could the same care have cost less?</h2>
@@ -725,6 +839,24 @@ document.addEventListener("click", async (ev) => {
       if (!hsaDone()) { S.step = 1; S.hsaGate = true; S.msg = "Before your answer: confirm the employer HSA money for each plan."; render(); window.scrollTo(0, 0); return; }
       await saveEmployers(); S.step = 3; S.analysis = null; render();
     }
+    else if (act === "spend-tab") {
+      S.spendTab = t.dataset.tab === "bills" ? "bills" : "spend"; if (S.spendTab === "bills") track("Check a bill opened"); render();
+      const tb = document.getElementById("stab-" + S.spendTab); if (tb) tb.focus();
+    }
+    else if (act === "bill-run") { runBill(t.dataset.tool); S.billTool = t.dataset.tool; track("Bill checked"); render(); }
+    else if (act === "bill-prefill") { prefillBill(t.dataset.tool, t.dataset.id); render(); const el = document.querySelector(`details[data-tool="${t.dataset.tool}"]`); if (el) el.scrollIntoView({ block: "start" }); }
+    else if (act === "bill-amt") { const f = (S.billForm[t.dataset.tool] ||= {}); f[t.dataset.k === "bill" ? "billed" : t.dataset.k] = Number(t.dataset.v); render(); }
+    else if (act === "bill-copy" || act === "bill-download") {
+      const ta = document.getElementById("letter-" + t.dataset.tool); if (!ta) return;
+      if (act === "bill-copy") { try { await navigator.clipboard.writeText(ta.value); t.textContent = "Copied"; } catch (e) { ta.select(); document.execCommand && document.execCommand("copy"); t.textContent = "Copied"; } }
+      else { const a = document.createElement("a"), url = URL.createObjectURL(new Blob([ta.value], { type: "text/plain" })); a.href = url; a.download = `HerePup letter - ${(S.billForm[t.dataset.tool] || {}).provider || "provider"}.txt`; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000); }
+    }
+    else if (act === "bill-save") {
+      const tool = t.dataset.tool, r = (S.billRes || {})[tool], d = S.billForm[tool] || {}; if (!r || r.error) return;
+      S.billChecks = [...(S.billChecks || []), { created: new Date().toISOString().slice(0, 10), tool, provider: d.provider || "", date: d.date || "", headline: r.headline, deadline: r.deadline || "" }];
+      S.billChecks = await post("/api/checks", S.billChecks, "PUT"); S.msg = "Saved to your checks below."; render();
+    }
+    else if (act === "bill-unsave") { S.billChecks.splice(+t.dataset.i, 1); S.billChecks = await post("/api/checks", S.billChecks, "PUT"); render(); }
     else if (act === "wipe") {
       if (confirm("Delete your household, plans and claims from this browser?")) { await api("/api/data", { method: "DELETE" }); CX.forget(); location.reload(); }
     }
@@ -837,6 +969,20 @@ document.addEventListener("change", async (ev) => {
     }
     if (t.dataset.act === "claims-file" && t.files[0]) { S.err = ""; await uploadClaims(t.files[0], t.dataset.kind); return; }
     if (t.dataset.act === "current-plan") { S.currentPlan = t.value; return; }
+    if (t.dataset.act === "bill-pdf" && t.files[0]) {
+      const key = `${t.dataset.tool}:${t.dataset.which === "bill" ? "billed" : "estimate"}`;
+      try { const doc = await pdfPages(t.files[0]); const found = B.amountsIn(doc.pages.join("\n")); S.billAmounts = { ...S.billAmounts, [key]: found };
+        S.msg = found.length ? "Pick the right total below the form." : "No totals were found in that file. Type the amount instead."; }
+      catch (e) { S.err = `Couldn't read that file: ${e.message}`; }
+      render(); return;
+    }
+    if (t.dataset.bf) {
+      const [tool, k] = t.dataset.bf.split("."); (S.billForm[tool] ||= {})[k] = t.value;
+      if (k === "claim" && t.value) prefillBill(tool, t.value);
+      if (tool === "cash" && k === "plan" && t.value) prefillPlan(t.value);
+      if (k === "claim" || k === "plan" || k === "kind") render();
+      return;
+    }
     if (t.dataset.pc) {
       const e = S.employers[+t.dataset.e], c = e && e.premium_choice; if (!c) return;
       if (t.dataset.pc === "band" && t.value !== "") { c.band = +t.value; c.band_set = true; }
@@ -858,12 +1004,15 @@ document.addEventListener("change", async (ev) => {
 document.addEventListener("keydown", (ev) => {
   const t = ev.target;
   if (t.getAttribute && t.getAttribute("role") === "tab" && (ev.key === "ArrowRight" || ev.key === "ArrowLeft")) {
-    ev.preventDefault(); S.answerTab = S.answerTab === "year" ? "month" : "year"; render();
+    ev.preventDefault();
+    if (t.dataset.act === "spend-tab") { S.spendTab = S.spendTab === "spend" ? "bills" : "spend"; render(); const sb = document.getElementById("stab-" + S.spendTab); if (sb) sb.focus(); return; }
+    S.answerTab = S.answerTab === "year" ? "month" : "year"; render();
     const tb = document.getElementById("tab-" + S.answerTab); if (tb) tb.focus();
   }
 });
 document.addEventListener("input", (ev) => {
   const t = ev.target;
+  if (t.dataset && t.dataset.bf && t.tagName === "INPUT") { const [tool, k] = t.dataset.bf.split("."); (S.billForm[tool] ||= {})[k] = t.value; return; }
   if (t.id === "mult") $("#mult-label").textContent = t.value + "%";
 });
 

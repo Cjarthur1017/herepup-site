@@ -865,6 +865,13 @@ export function mapFhir(resources) {
     const claimDate = ((eob.billablePeriod || {}).start || eob.created || "").slice(0, 10);
     const items = eob.item || [];
     const brand = (eob.supportingInfo || []).filter((s) => codes(s.category).map((c) => c.toLowerCase()).includes("brandgenericindicator")).map((s) => (codes(s.code)[0] || "").toLowerCase());
+    // In- or out-of-network, when the insurer says (CARIN: supportingInfo "benefitpaymentstatus", or adjudication categories).
+    const netCodes = [...(eob.supportingInfo || []).filter((s) => codes(s.category).some((c) => /benefitpaymentstatus/i.test(c))).flatMap((s) => codes(s.code)),
+      ...(eob.adjudication || []).flatMap((a) => codes(a.category)), ...items.flatMap((it) => (it.adjudication || []).flatMap((a) => codes(a.category)))].map((c) => c.toLowerCase());
+    const network = netCodes.some((c) => /^(outofnetwork|out-of-network|oon)$/.test(c)) ? "out" : netCodes.some((c) => /^(innetwork|in-network|inn)$/.test(c)) ? "in" : "";
+    // The provider's state (from the billing provider or facility address), for state-specific bill rules.
+    const stateOf = (ref) => { const r = resolve(ref, contained); const a = r && (r.address || [])[0]; return a && a.state ? String(a.state).toUpperCase().slice(0, 2) : ""; };
+    const providerState = stateOf(eob.provider) || stateOf(eob.facility) || stateOf((eob.payee || {}).party);
     // One row per line item when every line carries its own adjudicated amounts; otherwise one row for the claim from
     // its totals (some insurers put only partial amounts on the lines of facility claims).
     const lineAdj = items.map((it) => sumCats(it.adjudication)), totals = sumCats(eob.total);
@@ -888,6 +895,8 @@ export function mapFhir(resources) {
       const row = { id: `fhir-${eob.id || newId()}-${k + 1}`, date, member, provider, service: desc, category: typed ? typed[0] : "medical",
         billed: a.submitted ?? null, allowed, plan_paid: paid, member_resp: owe, copay: a.copay ?? null, deductible: a.deductible ?? null, coinsurance: a.coinsurance ?? null,
         needs_review: allowed == null || odd, place: pos.includes("11") ? "office" : (pos[0] && ["19", "21", "22", "23"].includes(pos[0]) ? "facility" : ""), claim: eob.id || "" };
+      if (network) row.network = network;
+      if (providerState) row.provider_state = providerState;
       if (typed) Object.assign(row, { type_source: typed[1], type_confidence: "high", type_locked: true });
       if (cpt[0] && row.category !== "rx") row.proc = cpt[0];
       if (row.category === "rx") Object.assign(row, { rx_tier: brand.join("").includes("generic") || !brand.length ? 1 : 2, type_source: "Pharmacy claim" + (brand.length ? ` (${brand[0]})` : ""),

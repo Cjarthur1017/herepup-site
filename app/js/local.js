@@ -8,7 +8,7 @@ import * as Y from "./years.js";
 
 const KEY = "herepup.v1";
 const TIERS = ["ee", "ee_sp", "ee_ch", "family"];
-const empty = () => ({ household: { members: [] }, employers: [], claims: [], current_plan: null, observed: null, settings: {} });
+const empty = () => ({ household: { members: [] }, employers: [], claims: [], current_plan: null, observed: null, settings: {}, bill_checks: [] });
 let mem = null, storageOk = true;
 const uid = () => Math.random().toString(16).slice(2, 8);
 const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -197,6 +197,7 @@ export async function handle(method, path, body, file) {
     save(s); return { employers: clone(s.employers), current_plan: s.current_plan };
   }
   if (method === "PUT" && p === "/api/settings") { s.settings = body || {}; save(s); return s.settings; }
+  if (method === "PUT" && p === "/api/checks") { s.bill_checks = Array.isArray(body) ? body.slice(0, 200) : []; save(s); return s.bill_checks; }
   if (method === "POST" && p === "/api/upload") return upload(file, url.searchParams.get("kind"), url.searchParams.get("order") ? url.searchParams.get("order").split(",").map((x) => x.trim()) : null, body && body.onProgress);
   if (method === "POST" && p === "/api/claims/commit") {
     const clean = [];
@@ -207,6 +208,7 @@ export async function handle(method, path, body, file) {
         copay: r.copay ?? null, deductible: r.deductible ?? null, coinsurance: r.coinsurance ?? null, service: r.service || "",
         type_source: r.type_source || "", place: r.place || "", source: r.source || "", processed_under: r.processed_under || "",
         proc: r.proc || "", rx_drug: r.rx_drug || "", pharmacy: r.pharmacy || "", rx_qty: r.rx_qty ?? null, payee: r.payee || "",
+        network: r.network || "", provider_state: r.provider_state || "",
         added: r.added || new Date().toISOString().slice(0, 10) });
     }
     if (body.replace) s.claims = clean;
