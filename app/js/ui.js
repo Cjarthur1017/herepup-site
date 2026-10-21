@@ -375,7 +375,7 @@ function connectPanel(cid) {
   return `<div class="cx" id="cx-panel"><h3>Connect to ${esc(c.name)} <span class="pill">Testing</span></h3>
     <p class="muted">Sign in at ${esc(c.name)} and your claims come straight into this browser. ${helper
       ? "Only the one-time sign-in step goes through HerePup's sign-in helper, which keeps nothing." : "Nothing passes through HerePup."}</p>
-    <label>Which data<select data-cx="env" data-cid="${cid}">${envs}</select></label>
+    ${Object.keys(c.envs).length > 1 ? `<label>Which data<select data-cx="env" data-cid="${cid}">${envs}</select></label>` : `<p class="muted">${esc(c.envs[ep.env].label)}</p>`}
     ${c.askMember ? `<label style="margin-top:8px">Whose ${esc(c.name)} is this?<select data-cx="member_id" data-cid="${cid}"><option value="">Choose a person...</option>${S.members.map((m) => `<option value="${esc(m.id)}" ${cfg.member_id === m.id ? "selected" : ""}>${esc(m.name)}</option>`).join("")}</select></label>` : ""}
     ${helper ? `<details><summary><b>App settings</b></summary>
       <label>Client ID (leave blank to use the sign-in helper's)<input data-cx="client_id" data-cid="${cid}" value="${esc(cfg.client_id || "")}" autocomplete="off" spellcheck="false"></label>

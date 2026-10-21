@@ -16,16 +16,9 @@ export const CARRIERS = {
     scope: "launch/patient patient/*.read",
     basic: true, // Aetna wants the client ID and secret as HTTP Basic on the token request
     covers: "Aetna's Patient Access API covers Medicare, Medicaid and some fully insured commercial plans. A self-funded employer plan can sign in fine and still return no claims.",
+    // Production only. Aetna's sandbox (vteapif1.aetna.com/fhirdemo, test member VTETestUser01) was removed from the
+    // app once production was approved; add it back here to test against synthetic data again.
     envs: {
-      sandbox: {
-        label: "Sandbox (Aetna test member, no real data)",
-        authorize: "https://vteapif1.aetna.com/fhirdemo/v1/fhirserver_auth/oauth2/authorize",
-        token: "https://vteapif1.aetna.com/fhirdemo/v1/fhirserver_auth/oauth2/token",
-        fhir: "https://vteapif1.aetna.com/fhirdemo/v2/patientaccess",
-        aud: "https://vteapif1.aetna.com/fhirdemo",
-        extra: { skin: "skin13" },
-        hint: "Aetna's published sandbox sign-in: VTETestUser01 / FHIRdemo2020",
-      },
       production: {
         label: "Production (your real Aetna claims)",
         authorize: "https://apif1.aetna.com/fhir/v1/fhirserver_auth/oauth2/authorize",
