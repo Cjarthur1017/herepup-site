@@ -50,7 +50,7 @@ const post = (p, body, method = "POST") => api(p, { method, headers: { "Content-
 
 function newPlan() {
   const z = () => ({ ee: 0, ee_sp: 0, ee_ch: 0, family: 0 });
-  return { name: "New plan", premium_annual: z(), hsa_employer: z(), hsa_eligible: false, hsa_answered: true, hsa_unknown: false, hsa_checked: false, deductible_ind: 0, deductible_fam: 0, oop_ind: 0, oop_fam: 0, coinsurance: 0.2, embedded: false, rx_in_deductible: true, copays: {}, copay_after_ded: false, rx_copays: [], rx_deductible_ind: 0, rx_deductible_fam: 0, flags: [] };
+  return { name: "New plan", premium_annual: z(), hsa_employer: z(), hsa_eligible: false, hsa_answered: true, hsa_unknown: false, hsa_checked: false, deductible_ind: 0, deductible_fam: 0, oop_ind: 0, oop_fam: 0, coinsurance: 0.2, embedded: false, rx_in_deductible: true, copays: {}, copay_after_ded: false, rx_copays: [], rx_tiers: [], rx_oop_ind: 0, rx_oop_fam: 0, rx_deductible_ind: 0, rx_deductible_fam: 0, flags: [] };
 }
 function setPath(obj, path, val) {
   const k = path.split(".");
@@ -114,6 +114,26 @@ function stepHousehold() {
   <button class="btn primary" data-act="save-household">Continue</button>`;
 }
 
+const RX_TIER_NAMES = ["Generic", "Preferred brand", "Non-preferred brand", "Specialty"];
+// One row per drug tier: a copay, or a coinsurance share with an optional minimum and maximum per fill.
+function rxTierTable(ei, pi, p) {
+  if (!(p.rx_tiers || []).length && (p.rx_copays || []).length) { p.rx_tiers = p.rx_copays.map((c) => ({ copay: c })); p.rx_copays = []; }
+  const t = p.rx_tiers || [], v = (x) => (x == null || x === "" ? "" : x);
+  const path = (i, k) => bind(`${ei}.plans.${pi}.rx_tiers.${i}.${k}`, "employers");
+  const rows = RX_TIER_NAMES.map((nm, i) => { const r = t[i] || {}; return `<tr><td>${nm}</td>
+    <td><input type="number" min="0" placeholder="none" aria-label="${nm} copay" ${path(i, "copay")} value="${v(r.copay)}"></td>
+    <td><input type="number" min="0" max="100" placeholder="none" data-pct="opt" aria-label="${nm} coinsurance percent" ${path(i, "coins")} value="${r.coins == null || r.coins === "" ? "" : Math.round(r.coins * 1000) / 10}"></td>
+    <td><input type="number" min="0" placeholder="none" aria-label="${nm} minimum per fill" ${path(i, "min")} value="${v(r.min)}"></td>
+    <td><input type="number" min="0" placeholder="none" aria-label="${nm} maximum per fill" ${path(i, "max")} value="${v(r.max)}"></td></tr>`; }).join("");
+  return `<div class="scroll"><table style="margin-top:8px"><thead><tr><th>Drug tier (retail)</th><th>Copay ($)</th><th>or coinsurance (%)</th><th>Min per fill ($)</th><th>Max per fill ($)</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="muted">Leave a tier blank to use the plan's deductible and coinsurance for it.</p>`;
+}
+const rxSummary = (p) => {
+  const t = (p.rx_tiers || []).length ? p.rx_tiers : (p.rx_copays || []).map((c) => ({ copay: c }));
+  const one = (r) => (!r ? "?" : r.coins != null && r.coins !== "" ? `${Math.round(r.coins * 1000) / 10}%${r.min != null || r.max != null ? ` (${r.min != null ? usd(r.min) + " min" : ""}${r.min != null && r.max != null ? ", " : ""}${r.max != null ? usd(r.max) + " max" : ""})` : ""}` : r.copay != null && r.copay !== "" ? usd(r.copay) : "?");
+  return t.length ? t.map(one).join(" / ") + (p.rx_in_deductible && t.some((r) => r && r.coins != null) ? " after deductible" : "") : "none found";
+};
+
 function planCard(e, ei, p, pi) {
   const hints = S.hints[`${ei}:${pi}`];
   const tierRows = TIERS.map(([k, label]) => `<tr class="tier"><td>${label}</td>
@@ -137,12 +157,39 @@ function planCard(e, ei, p, pi) {
     ${(p.flags || []).length ? `<div class="warn"><b>Check these:</b><ul>${p.flags.map((f) => `<li>${esc(f)}</li>`).join("")}</ul></div>` : ""}
     <div class="row" style="margin:12px 0">
       ${[["office", "Office visit copay"], ["specialist", "Specialist copay"], ["urgent", "Urgent care copay"], ["er", "ER copay"]].map(([k, l]) => `<label>${l}<input type="number" min="0" placeholder="none" ${bind(`${ei}.plans.${pi}.copays.${k}`, "employers")} value="${p.copays && p.copays[k] != null ? p.copays[k] : ""}"></label>`).join("")}
-      ${[0, 1, 2].map((t) => `<label>Rx tier ${t + 1} copay<input type="number" min="0" placeholder="none" ${bind(`${ei}.plans.${pi}.rx_copays.${t}`, "employers")} value="${p.rx_copays && p.rx_copays[t] != null ? p.rx_copays[t] : ""}"></label>`).join("")}
       <label>Separate pharmacy deductible (person)<input type="number" min="0" ${bind(`${ei}.plans.${pi}.rx_deductible_ind`, "employers")} value="${p.rx_deductible_ind || 0}"></label>
-      <label>Pharmacy deductible (family)<input type="number" min="0" ${bind(`${ei}.plans.${pi}.rx_deductible_fam`, "employers")} value="${p.rx_deductible_fam || 0}"></label></div>
+      <label>Pharmacy deductible (family)<input type="number" min="0" ${bind(`${ei}.plans.${pi}.rx_deductible_fam`, "employers")} value="${p.rx_deductible_fam || 0}"></label>
+      <label>Separate prescription out-of-pocket max (person)<input type="number" min="0" placeholder="none" ${bind(`${ei}.plans.${pi}.rx_oop_ind`, "employers")} value="${p.rx_oop_ind || ""}"></label>
+      <label>Prescription out-of-pocket max (family)<input type="number" min="0" placeholder="none" ${bind(`${ei}.plans.${pi}.rx_oop_fam`, "employers")} value="${p.rx_oop_fam || ""}"></label></div>
+    ${rxTierTable(ei, pi, p)}
     <div class="row"><label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" ${bind(`${ei}.plans.${pi}.copay_after_ded`, "employers")} ${p.copay_after_ded ? "checked" : ""}>Copays apply only after the deductible is met</label></div>
     <p class="muted hsa-status">${p.hsa_checked ? (p.hsa_eligible ? `<span class="chip">HSA confirmed: ${hsaSummary(p)}</span>` : `<span class="chip">Confirmed: no HSA</span>`) : "You'll confirm this plan's HSA money on the next screen."}</p>
     <div class="scroll"><table style="margin-top:8px"><thead><tr><th>Coverage level</th><th>Your annual premium ($)</th><th>Employer HSA ($/yr)</th></tr></thead><tbody>${tierRows}</tbody></table></div></div>`;
+}
+
+// Guides that price plans by pay band and/or tobacco use: ask, then fill each plan's premiums from the guide's table.
+function applyPremiumChoice(e) {
+  const c = e.premium_choice; if (!c) return;
+  for (const p of e.plans) {
+    const row = (p.premium_table || []).find((r) => (r.band == null || r.band === c.band) && (r.tobacco == null || r.tobacco === !!c.tobacco_user));
+    if (row) p.premium_annual = { ...row.premium_annual };
+  }
+  S.analysis = null; S.timeline = null;
+}
+function premiumQuestions(e, ei) {
+  const c = e.premium_choice; if (!c || (!c.bands && !c.tobacco)) return "";
+  const who = esc(e.name || "This employer");
+  const what = [c.bands && "pay", c.tobacco && "tobacco use"].filter(Boolean).join(" and ");
+  return `<div class="card pc ${c.answered ? "" : "pc-open"}"><h2>Your premiums at ${who}</h2>
+    <p>${who}'s premiums depend on ${what}. Answer ${c.bands && c.tobacco ? "both questions" : "this"} so HerePup uses your rates. Your answers stay on this device.</p>
+    ${c.bands ? `<label>Which pay band are you in?<select data-pc="band" data-e="${ei}">${c.band_set ? "" : `<option value="" selected>Choose your pay band</option>`}${c.bands.map((b, i) => `<option value="${i}" ${c.band_set && i === c.band ? "selected" : ""}>${esc(b)}</option>`).join("")}</select></label>
+      ${c.band_help ? `<p class="muted">From the guide: "${esc(c.band_help)}"</p>` : ""}` : ""}
+    ${c.tobacco ? `<fieldset class="gate-q"><legend>Does anyone you'd cover use tobacco?</legend>
+      <label class="radio"><input type="radio" name="pc-tob-${ei}" value="no" data-pc="tobacco" data-e="${ei}" ${c.tobacco_set && !c.tobacco_user ? "checked" : ""}>No one, or they'll complete the quit program (tobacco-free rates)</label>
+      <label class="radio"><input type="radio" name="pc-tob-${ei}" value="yes" data-pc="tobacco" data-e="${ei}" ${c.tobacco_set && c.tobacco_user ? "checked" : ""}>Yes (standard rates)</label></fieldset>
+      <p class="muted">Tobacco-free rates usually require that no one covered has used tobacco recently, or that they finish a quit program by a deadline. Your guide has the exact rule.</p>` : ""}
+    ${c.answered ? `<p class="muted">Premiums below now use ${c.bands ? `the ${esc(c.bands[c.band])} band` : ""}${c.bands && c.tobacco ? " and " : ""}${c.tobacco ? (c.tobacco_user ? "standard (tobacco) rates" : "tobacco-free rates") : ""}.</p>`
+      : `<p class="warn">Until you answer, premiums assume ${c.bands ? `the lowest band (${esc(c.bands[0])})` : ""}${c.bands && c.tobacco ? " and " : ""}${c.tobacco ? "tobacco-free rates" : ""}.</p>`}</div>`;
 }
 
 const hsaDone = () => S.employers.every((e) => e.plans.every((p) => p.hsa_checked));
@@ -159,6 +206,7 @@ function addGuideTo(ei, r, file) {
   if (d.plans.length) {
     const z = () => ({ ee: 0, ee_sp: 0, ee_ch: 0, family: 0 });
     e.plans = e.plans.filter((p) => !isBlankPlan(p)).concat(d.plans.map((p) => ({ ...newPlan(), ...p, hsa_checked: false, hsa_employer: { ...z(), ...(p.hsa_employer || {}) } })));
+    if (d.premium_choice) e.premium_choice = { ...d.premium_choice };
     if (!e.name.trim() && d.employer) e.name = d.employer;
     S.msg = `Added ${d.plans.length} plan option(s) from ${file} to ${e.name || "this employer"}`.replace(/\.?$/, ". ") + "Check the numbers below.";
   } else {
@@ -209,16 +257,17 @@ function stepPlans() {
     <label>Who works there?<select ${bind(`${ei}.subscriber`, "employers")}><option value="">Choose...</option>${memberOpts(e.subscriber)}</select></label>
     <button class="btn small danger" data-act="rm-employer" data-e="${ei}">Remove employer</button></div>
     ${dropZone(`plan:${ei}`, `Drop ${e.name || "this employer"}'s benefit guide here and we'll fetch the details`, "PDF, typed or scanned. HerePup adds every plan option it finds to this employer.", true)}
+    ${premiumQuestions(e, ei)}
     ${e.plans.map((p, pi) => planCard(e, ei, p, pi)).join("")}
     <button class="btn" data-act="add-plan" data-e="${ei}">Add a plan option for ${esc(e.name || "this employer")}</button></section>`).join("");
   const cur = S.employers.flatMap((e, ei) => e.plans.map((p, pi) => `<option value="${e.id}:${pi}" ${S.currentPlan === `${e.id}:${pi}` ? "selected" : ""}>${esc(e.name)}: ${esc(p.name)}</option>`)).join("");
   const found = S.detected.map((d, di) => `<div class="card" style="border-color:#1F7A7A"><h2>${d.plans.length ? `Found ${d.plans.length} plan option(s) in ${esc(d.file)}` : `No plan table found in ${esc(d.file)}`}</h2>
     ${d.message ? `<div class="warn">${esc(d.message)}</div>` : ""}
     ${(d.notes || []).map((n) => `<p class="muted">${esc(n)}</p>`).join("")}
-    ${d.plans.length ? `<div class="scroll"><table><thead><tr><th>Plan</th><th>Deductible (person / family)</th><th>Out-of-pocket max</th><th>Visit copays</th><th>Rx tiers 1-3</th><th>Premium per year (you / you+spouse / you+kids / family)</th></tr></thead><tbody>
+    ${d.plans.length ? `<div class="scroll"><table><thead><tr><th>Plan</th><th>Deductible (person / family)</th><th>Out-of-pocket max</th><th>Visit copays</th><th>Drug tiers (generic / brand / non-preferred)</th><th>Premium per year (you / you+spouse / you+kids / family)</th></tr></thead><tbody>
       ${d.plans.map((p) => `<tr><td>${esc(p.name)}</td><td>${usd(p.deductible_ind)} / ${usd(p.deductible_fam)}</td><td>${usd(p.oop_ind)} / ${usd(p.oop_fam)}</td>
       <td>${p.copays && p.copays.office != null ? `${usd(p.copays.office)} / ${usd(p.copays.specialist)}${p.copay_after_ded ? " after deductible" : ""}` : "none found"}</td>
-      <td>${(p.rx_copays || []).map(usd).join(" / ") || "none found"}</td>
+      <td>${esc(rxSummary(p))}</td>
       <td>${usd(p.premium_annual.ee)} / ${usd(p.premium_annual.ee_sp)} / ${usd(p.premium_annual.ee_ch)} / ${usd(p.premium_annual.family)}</td></tr>`).join("")}</tbody></table></div>
     <div class="row" style="margin-top:12px"><label>Employer name<input id="det-emp-${di}" data-det="${di}" data-det-field="employer" value="${esc(d.employer || "")}"></label>
     <label>Who works there?<select id="det-sub-${di}" data-det="${di}" data-det-field="sub"><option value="">Choose...</option>${memberOpts(d.sub || "")}</select></label>
@@ -585,7 +634,8 @@ document.addEventListener("click", async (ev) => {
       const di = +t.dataset.i, d = S.detected[di], sub = $("#det-sub-" + di).value, name = $("#det-emp-" + di).value.trim();
       if (!name) throw new Error("Give the employer a name."); if (!sub) throw new Error("Choose who works there.");
       const z = () => ({ ee: 0, ee_sp: 0, ee_ch: 0, family: 0 });
-      S.employers.push({ id: uid(), name, subscriber: sub, plans: d.plans.map((p) => ({ ...newPlan(), ...p, hsa_employer: { ...z(), ...(p.hsa_employer || {}) } })) });
+      S.employers.push({ id: uid(), name, subscriber: sub, plans: d.plans.map((p) => ({ ...newPlan(), ...p, hsa_employer: { ...z(), ...(p.hsa_employer || {}) } })),
+        ...(d.premium_choice ? { premium_choice: { ...d.premium_choice } } : {}) });
       S.detected.splice(di, 1); S.msg = `Added ${name} with ${d.plans.length} plan option(s). Review the numbers, then continue.`; render();
     }
     else if (act === "clear-detected") { S.detected.splice(+t.dataset.i, 1); render(); }
@@ -655,6 +705,8 @@ document.addEventListener("click", async (ev) => {
       if (!S.employers.length) throw new Error("Add at least one employer.");
       for (const e of S.employers) { if (!e.name.trim()) throw new Error("Give each employer a name."); if (!e.subscriber) throw new Error(`Choose who works at ${e.name}.`); }
       if (!S.employers.some((e) => e.plans.length)) throw new Error("Add at least one plan option.");
+      const open = S.employers.find((e) => e.premium_choice && (e.premium_choice.bands || e.premium_choice.tobacco) && !e.premium_choice.answered);
+      if (open) throw new Error(`Answer the premium questions for ${open.name} first: its premiums depend on ${[open.premium_choice.bands && "your pay band", open.premium_choice.tobacco && "tobacco use"].filter(Boolean).join(" and ")}.`);
       await saveEmployers(); S.hsaGate = true; render(); window.scrollTo(0, 0);
     }
     else if (act === "reparse") {
@@ -785,10 +837,17 @@ document.addEventListener("change", async (ev) => {
     }
     if (t.dataset.act === "claims-file" && t.files[0]) { S.err = ""; await uploadClaims(t.files[0], t.dataset.kind); return; }
     if (t.dataset.act === "current-plan") { S.currentPlan = t.value; return; }
+    if (t.dataset.pc) {
+      const e = S.employers[+t.dataset.e], c = e && e.premium_choice; if (!c) return;
+      if (t.dataset.pc === "band" && t.value !== "") { c.band = +t.value; c.band_set = true; }
+      if (t.dataset.pc === "tobacco") { c.tobacco_user = t.value === "yes"; c.tobacco_set = true; }
+      c.answered = (!c.bands || !!c.band_set) && (!c.tobacco || !!c.tobacco_set);
+      applyPremiumChoice(e); render(); return;
+    }
     if (t.dataset.bind) {
       const root = t.dataset.root === "members" ? S.members : t.dataset.root === "employers" ? S.employers : S.review.rows;
       let v = t.type === "checkbox" ? t.checked : t.type === "number" ? (t.value === "" ? null : Number(t.value)) : t.value;
-      if (t.dataset.pct) v = (v || 0) / 100;
+      if (t.dataset.pct) v = v == null && t.dataset.pct === "opt" ? null : (v || 0) / 100;
       setPath(root, t.dataset.bind, v);
       if (t.dataset.bind.endsWith(".subscriber") || t.dataset.bind.endsWith(".name")) { /* no re-render to keep focus */ }
     }

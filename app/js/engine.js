@@ -23,12 +23,15 @@ export function simulate(plan, claims, members, multiplier = 1) {
   const copays = plan.copays || {};
   const copayAfterDed = !!plan.copay_after_ded;
   const rxCopays = (plan.rx_copays || []).map(Number);
+  // rx_tiers (when present) replaces rx_copays: per tier a flat copay or a coinsurance share with optional min/max per fill.
+  const rxTiers = Array.isArray(plan.rx_tiers) ? plan.rx_tiers.map((t) => t || {}) : [];
+  const rxOopInd = num(plan.rx_oop_ind), rxOopFam = num(plan.rx_oop_fam) || 2 * rxOopInd;
   const rxDedInd = num(plan.rx_deductible_ind);
   const rxDedFam = num(plan.rx_deductible_fam) || 2 * rxDedInd;
 
-  const dedUsed = {}, oopUsed = {}, rxDedUsed = {};
-  for (const m of covered) { dedUsed[m] = 0; oopUsed[m] = 0; rxDedUsed[m] = 0; }
-  let famDed = 0, famOop = 0, famRxDed = 0, totalMember = 0, totalPlan = 0;
+  const dedUsed = {}, oopUsed = {}, rxDedUsed = {}, rxOopUsed = {};
+  for (const m of covered) { dedUsed[m] = 0; oopUsed[m] = 0; rxDedUsed[m] = 0; rxOopUsed[m] = 0; }
+  let famDed = 0, famOop = 0, famRxDed = 0, famRxOop = 0, totalMember = 0, totalPlan = 0;
   const lines = [];
   const visitCat = new Map();
   for (const c of claims) {
@@ -51,12 +54,29 @@ export function simulate(plan, claims, members, multiplier = 1) {
     if (cat === "preventive") { memberCost = 0; basis = "preventive"; }
     else if (bundled) { memberCost = 0; basis = "covered by visit copay"; }
     else {
-      let flat = null, tier = 1;
-      if (cat === "rx" && rxCopays.length) {
+      let flat = null, tier = 1, coinTier = null;
+      if (cat === "rx" && rxTiers.length) {
+        tier = Math.min(Math.max(parseInt(c.rx_tier || 1, 10) || 1, 1), rxTiers.length);
+        const t = rxTiers[tier - 1];
+        if (t.coins != null && t.coins !== "") coinTier = t; else if (t.copay != null && t.copay !== "") flat = num(t.copay);
+      } else if (cat === "rx" && rxCopays.length) {
         tier = Math.min(Math.max(parseInt(c.rx_tier || 1, 10) || 1, 1), rxCopays.length);
         flat = rxCopays[tier - 1];
       } else if (cat !== "rx" && copays[cat] != null) flat = num(copays[cat]);
-      if (flat != null && cat === "rx" && !rxInDed) {
+      if (coinTier) {
+        let d = 0;
+        if (rxInDed) { dedPart = Math.min(amt, remMainDed(m)); d = dedPart; }
+        else if (rxDedInd && tier > 1) {
+          const rem = Math.min(Math.max(rxDedInd - rxDedUsed[m], 0), Math.max(rxDedFam - famRxDed, 0));
+          d = Math.min(amt, rem); rxDedUsed[m] += d; famRxDed += d;
+        }
+        const rest = amt - d;
+        let share = rest * num(coinTier.coins);
+        if (rest > 0 && coinTier.min != null && coinTier.min !== "") share = Math.max(share, num(coinTier.min));
+        if (coinTier.max != null && coinTier.max !== "") share = Math.min(share, num(coinTier.max));
+        memberCost = d + Math.min(share, rest);
+        basis = d >= amt - 0.005 ? (rxInDed ? "deductible" : "pharmacy deductible") : d > 0 ? "deductible + coinsurance" : "coinsurance";
+      } else if (flat != null && cat === "rx" && !rxInDed) {
         let d = 0;
         if (rxDedInd && tier > 1) {
           const rem = Math.min(Math.max(rxDedInd - rxDedUsed[m], 0), Math.max(rxDedFam - famRxDed, 0));
@@ -75,9 +95,16 @@ export function simulate(plan, claims, members, multiplier = 1) {
         basis = dedPart >= amt - 0.005 ? "deductible" : (flat != null && dedPart > 0 ? "deductible + copay" : flat != null ? "copay"
           : rest > 0 && coins > 0 && dedPart === 0 ? "coinsurance" : dedPart > 0 && coins > 0 && rest > 0 ? "deductible + coinsurance" : "covered after deductible");
       }
-      const remOop = embedded ? Math.min(Math.max(oopInd - oopUsed[m], 0), Math.max(oopFam - famOop, 0)) : Math.max(oopFam - famOop, 0);
-      if (memberCost > remOop) { memberCost = remOop; dedPart = Math.min(dedPart, memberCost); }
-      dedUsed[m] += dedPart; famDed += dedPart; oopUsed[m] += memberCost; famOop += memberCost;
+      if (cat === "rx" && rxOopInd > 0) {
+        // Separate pharmacy out-of-pocket maximum: drug costs count toward it instead of the medical one.
+        const remRx = Math.min(Math.max(rxOopInd - rxOopUsed[m], 0), Math.max(rxOopFam - famRxOop, 0));
+        if (memberCost > remRx) { memberCost = remRx; dedPart = Math.min(dedPart, memberCost); }
+        dedUsed[m] += dedPart; famDed += dedPart; rxOopUsed[m] += memberCost; famRxOop += memberCost;
+      } else {
+        const remOop = embedded ? Math.min(Math.max(oopInd - oopUsed[m], 0), Math.max(oopFam - famOop, 0)) : Math.max(oopFam - famOop, 0);
+        if (memberCost > remOop) { memberCost = remOop; dedPart = Math.min(dedPart, memberCost); }
+        dedUsed[m] += dedPart; famDed += dedPart; oopUsed[m] += memberCost; famOop += memberCost;
+      }
     }
     totalMember += memberCost; totalPlan += amt - memberCost;
     lines.push({ id: c.id, date: c.date, member: m, allowed: r2(amt), member_cost: r2(memberCost), basis });

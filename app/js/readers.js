@@ -452,6 +452,99 @@ function servicesByColumn(items, names) {
   return seen ? out : null;
 }
 
+// ------------------------------------------------------------------ prescription tables in any layout
+// Reads drug tiers wherever a guide puts them: a section per plan ("Prescription Drug Coverage for the X Plan"),
+// a table whose columns are plan names (repeated for retail and mail order), or rows inside the comparison table.
+// Cells can be copays ("$8 copay"), coinsurance ("30%", with "($30 min/$100 max)"), "No charge" or "Not covered".
+const RX_TIERS = [[0, /^(?:preferred\s+)?generic(?:s| drugs?)?\b|^tier\s*1\b/i], [3, /^specialty\b|^tier\s*[45]\b/i],
+  [2, /^non[- ]?preferred\b|^non[- ]?formulary\b|^tier\s*3\b/i], [1, /^(?:preferred\s+)?brand\b|^preferred\b|^formulary brand\b|^tier\s*2\b/i]];
+const rxTierOf = (l) => { const hit = RX_TIERS.find(([, re]) => re.test(l)); return hit ? hit[0] : null; };
+const shortName = (nm) => nm.replace(/\b(plans?|health savings|option)\b/gi, " ").replace(/\s+/g, " ").trim() || nm;
+const undouble = (l) => l.replace(/\b([A-Za-z][\w-]{1,30}?)\1\b/g, "$1");
+function planMentions(l, plans) {
+  const hits = [];
+  plans.forEach((p, i) => {
+    for (const nm of [p.name, shortName(p.name)]) {
+      const re = new RegExp(`(?<![A-Za-z])${nm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z])`, "g");
+      const found = [...l.matchAll(re)].map((m) => [m.index, i, m[0].length]);
+      if (found.length) { hits.push(...found); break; }
+    }
+  });
+  return hits.sort((a, b) => a[0] - b[0]).filter((h, k, arr) => !k || h[0] >= arr[k - 1][0] + arr[k - 1][2]);
+}
+function rxCells(text) {
+  const mm = [...text.matchAll(/\$\s?(\d[\d,]*)\s*min(?:imum)?\s*(?:\/|,|and)?\s*\$\s?(\d[\d,]*)\s*max(?:imum)?/gi)].map((m) => [+m[1].replace(/,/g, ""), +m[2].replace(/,/g, "")]);
+  let rest = text.replace(/\$\s?\d[\d,]*\s*min(?:imum)?\s*(?:\/|,|and)?\s*\$\s?\d[\d,]*\s*max(?:imum)?/gi, " ");
+  // A cap on its own: "($100 max)", "up to $250", "maximum $150".
+  const capOnly = [];
+  rest = rest.replace(/\$\s?(\d[\d,]*)\s*max(?:imum)?\b|(?:up to|max(?:imum)?(?: of)?)\s*\$\s?(\d[\d,]*)/gi, (_, a, b) => { capOnly.push(+(a || b).replace(/,/g, "")); return " "; });
+  const planPays = /plan pays/i.test(rest);
+  const cells = [], ms = [...rest.matchAll(/\$\s?(\d[\d,]*(?:\.\d\d)?)|(\d{1,3})\s?%|\b(no charge|not covered|n\/a)\b/gi)];
+  ms.forEach((m, j) => {
+    // "after deductible" written in the cell itself applies to that plan only.
+    const tail = rest.slice(m.index + m[0].length, j + 1 < ms.length ? ms[j + 1].index : undefined);
+    const after = /after\s+(?:the\s+)?(?:annual\s+)?deductible|deductible\s+(?:applies|first)/i.test(tail);
+    if (m[1] != null) cells.push({ copay: Number(m[1].replace(/,/g, "")), after });
+    else if (m[2] != null) { const v = +m[2] / 100; cells.push({ coins: planPays ? r2(1 - v) : v, after }); }
+    else cells.push(/no charge/i.test(m[3]) ? { copay: 0, after } : null);
+  });
+  let k = 0;
+  for (const c of cells) if (c && c.coins != null && mm[k]) { [c.min, c.max] = mm[k]; k++; }
+  k = 0;
+  for (const c of cells) if (c && c.coins != null && c.max == null && capOnly[k] != null) { c.max = capOnly[k]; k++; }
+  return cells;
+}
+function readRx(pages, plans) {
+  const n = plans.length, res = plans.map(() => ({ tiers: [], after: false, oopInd: 0, oopFam: 0 }));
+  const FILLER = /\b(retail|home delivery|mail(?: order| service)?|pharmacy|supply|day|up to|\d+|in-network|out-of-network|copays?|coinsurance|you pay|and|plans?|health savings|the|for)\b|[()\-–,:/&]/gi;
+  for (const page of pages) {
+    const ls = page.split("\n").map((x) => undouble(x.trim())).filter(Boolean);
+    let ctx = null, oop = false;
+    for (let li = 0; li < ls.length; li++) {
+      const l = ls[li], tier = rxTierOf(l), ment = tier == null ? planMentions(l, plans) : [];
+      if (ment.length) {
+        const rest = ment.reduceRight((s, [at, , len]) => s.slice(0, at) + " " + s.slice(at + len), l).replace(FILLER, " ").trim();
+        if (/prescription|pharmac|\brx\b|drug/i.test(l) && !rest.match(/[$%]/)) { ctx = { plans: [...new Set(ment.map((h) => h[1]))], cols: null, after: false }; oop = false; continue; }
+        if (!rest) { ctx = ctx || { plans: [...new Set(ment.map((h) => h[1]))], after: false }; ctx.cols = ment.map((h) => h[1]); continue; }
+      }
+      if (ctx && tier == null && !rxCells(l).length && /after\s+(?:the\s+)?(?:annual\s+)?deductible|deductible\s+(?:is\s+)?met|count toward (?:both )?the (?:medical )?(?:plan )?(?:annual )?deductible/i.test(l)) ctx.after = true;
+      if (/(prescription|pharmacy|rx|drug)[^$]*out[- ]of[- ]pocket/i.test(l) && !moneyList(l).length) { oop = true; continue; }
+      if (oop) {
+        const t = tierOf(l), v = moneyList(l);
+        const fam = /^all other (?:tiers|levels|coverage)/i.test(l) || t === "family";
+        if ((t || fam) && v.length) {
+          const who = ctx && ctx.plans.length === 1 ? ctx.plans : v.length === n ? plans.map((_, i) => i) : [];
+          who.forEach((pi, j) => { const x = who.length === 1 ? v[0] : v[j]; if (t === "ee") res[pi].oopInd = res[pi].oopInd || x; else if (fam) res[pi].oopFam = res[pi].oopFam || x; });
+          continue;
+        }
+        if (!/^\d+$/.test(l)) oop = false;
+      }
+      if (tier == null) continue;
+      let text = l.replace(RX_TIERS.find(([t]) => t === tier)[1], "");
+      for (let k = li + 1; k < Math.min(li + 4, ls.length); k++) {
+        const nx = ls[k];
+        if (rxTierOf(nx) != null || planMentions(nx, plans).length || /^annual\b|out[- ]of[- ]pocket/i.test(nx)) break;
+        const hasCells = rxCells(nx.replace(/\$\s?\d[\d,]*\s*min[^$]*\$\s?\d[\d,]*\s*max/gi, "")).length;
+        if (hasCells && rxCells(text).length) break;
+        text += " " + nx;
+      }
+      const cells = rxCells(text);
+      if (!cells.length) continue;
+      let pairs = [];
+      if (ctx && ctx.cols) { const g = new Set(ctx.cols).size; pairs = ctx.cols.slice(0, g).map((pi, j) => [pi, cells[j]]); }
+      else if (ctx && ctx.plans.length === 1) pairs = [[ctx.plans[0], cells[0]]];
+      else if (ctx && cells.length === ctx.plans.length) pairs = ctx.plans.map((pi, j) => [pi, cells[j]]);
+      else if (cells.length === n || n === 1) pairs = plans.map((_, i) => [i, cells[i]]);
+      for (const [pi, c] of pairs) {
+        if (c === undefined || res[pi].tiers[tier] !== undefined) continue;
+        res[pi].tiers[tier] = c;
+        if ((ctx && ctx.after) || (c && c.after)) res[pi].after = true;
+      }
+    }
+  }
+  return res;
+}
+
 export function detectPlans(pages, filename = "", layout = null) {
   const notes = [];
   let best = null;
@@ -591,38 +684,77 @@ export function detectPlans(pages, filename = "", layout = null) {
       if (cells.length === n) cells.forEach((c, i) => { if (c[1]) { plans[i].rx_deductible_ind = Number(c[1].replace(/,/g, "")); plans[i].rx_deductible_fam = Number(c[2].replace(/,/g, "")); plans[i].rx_in_deductible = false; } });
     });
     plans.forEach((p) => p.flags.push("Specialty drug tiers (4 and 5) are not modeled; tier 1-3 copays are. Rx tier per fill is a guess until you set it."));
-  } else plans.forEach((p) => p.flags.push("Prescription copays were not found. Prescriptions are modeled with the medical deductible and coinsurance."));
-  let premFound = false;
+  } else {
+    const rx = readRx(pages, plans);
+    plans.forEach((p, i) => {
+      const r = rx[i], tiers = Array.from({ length: r.tiers.length }, (_, t) => r.tiers[t] || {});
+      if (!tiers.some((t) => t.copay != null || t.coins != null)) {
+        p.flags.push("Prescription costs were not found. Prescriptions are modeled with the medical deductible and coinsurance.");
+        return;
+      }
+      p.rx_tiers = tiers.map((t) => ({ copay: t.copay ?? null, coins: t.coins ?? null, min: t.min ?? null, max: t.max ?? null }));
+      if (r.oopInd) { p.rx_oop_ind = r.oopInd; p.rx_oop_fam = r.oopFam || 2 * r.oopInd; }
+      if (r.after) p.rx_in_deductible = true;
+      else if (r.oopInd || tiers.every((t) => t.coins == null)) p.rx_in_deductible = false;
+      const miss = ["generic", "preferred brand", "non-preferred brand"].filter((_, t) => !tiers[t] || (tiers[t].copay == null && tiers[t].coins == null));
+      p.flags.push(`Drug costs were read from the guide${r.oopInd ? `, with a separate prescription out-of-pocket maximum of ${r.oopInd.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })} per person` : ""}. ${miss.length ? `The ${miss.join(" and ")} tier wasn't found, so it uses the medical deductible and coinsurance. ` : ""}Which tier each fill falls in is a guess until you set it.`);
+    });
+  }
+  let premFound = false, premiumChoice = null;
   for (const page of pages) {
     const pl = page.split("\n").map((l) => l.trim()).filter(Boolean);
     if (!/medical/i.test(page)) continue;
-    // Some guides price each plan twice (standard vs tobacco-free); use the tobacco-free column.
+    // Some guides price each plan twice (standard vs tobacco-free) and repeat the table for each pay band.
     const hdr = pl.find((l) => (l.match(/tobacco[- ]?free|non[- ]?tobacco|non[- ]?smoker/gi) || []).length >= 2);
-    const twin = hdr ? [...hdr.matchAll(/tobacco[- ]?free|non[- ]?tobacco|non[- ]?smoker|tobacco[- ]?user|smoker|standard/gi)].map((m) => /free|non/i.test(m[0])) : null;
-    const raw = {};
+    const twinCols = hdr ? [...hdr.matchAll(/tobacco[- ]?free|non[- ]?tobacco|non[- ]?smoker|tobacco[- ]?user|smoker|standard/gi)].map((m) => /free|non/i.test(m[0])) : null;
+    const twin = twinCols && twinCols.length === 2 * n ? twinCols : null;
+    const blocks = []; let cur = {};
     for (const l of pl) {
       const t = tierOf(l);
-      if (!t || raw[t]) continue;
-      let vals = [...l.matchAll(/\$?\s?(\d[\d,]*\.\d{2})/g)].map((m) => Number(m[1].replace(/,/g, "")));
-      if (twin && twin.length === 2 * n && vals.length === 2 * n) vals = vals.filter((_, i) => twin[i]);
-      if (vals.length >= n) raw[t] = vals.slice(0, n);
+      if (!t) continue;
+      const vals = [...l.matchAll(/\$?\s?(\d[\d,]*\.\d{2})/g)].map((m) => Number(m[1].replace(/,/g, "")));
+      if (vals.length < n || (twin && vals.length !== 2 * n)) continue;
+      if (cur[t]) { blocks.push(cur); cur = {}; }
+      cur[t] = vals;
     }
-    const rows = fourTiers(raw);
-    if (Object.keys(rows).length >= 3) {
+    if (Object.keys(cur).length) blocks.push(cur);
+    const pick = (raw, free) => fourTiers(Object.fromEntries(Object.entries(raw).map(([t, v]) => [t, (twin ? v.filter((_, i) => twin[i] === free) : v).slice(0, n)])));
+    const first = blocks[0] ? pick(blocks[0], true) : {};
+    if (Object.keys(first).length >= 3) {
       let [factor, label] = periods(page);
       if (factor == null) {
         const elsewhere = pages.join("\n").match(/(\d{2})\s+pay\s*periods/i);
         if (elsewhere) { factor = +elsewhere[1]; label = `${elsewhere[1]} pay periods, stated elsewhere in the guide`; }
         else { factor = 26; label = "assumed 26 pay periods (not stated)"; notes.push("The guide did not say how often premiums are deducted; 26 per year was assumed. Check the annual premiums."); }
       }
-      for (const [tier, vals] of Object.entries(rows)) plans.forEach((p, i) => { p.premium_annual[tier] = r2(vals[i] * factor); });
+      const annual = (rows, i) => { const o = { ee: 0, ee_sp: 0, ee_ch: 0, family: 0 }; for (const [t, v] of Object.entries(rows)) o[t] = r2(v[i] * factor); return o; };
+      // Every pay band x tobacco status, so the plan step can ask instead of guessing.
+      const bandLabels = pl.filter((l) => /^\$[\d,]+\s*(?:-|–|to)\s*\$[\d,]+$|^\$[\d,]+\s*\+$|^(?:under|less than|up to|over|more than)\s+\$[\d,]+$/i.test(l));
+      const bands = bandLabels.length > 1 && bandLabels.length === blocks.length ? bandLabels : null;
+      const used = bands ? blocks : blocks.slice(0, 1);
+      plans.forEach((p, i) => {
+        p.premium_table = [];
+        used.forEach((b, bi) => {
+          for (const free of twin ? [true, false] : [true]) {
+            const rows = pick(b, free);
+            if (Object.keys(rows).length >= 3) p.premium_table.push({ band: bands ? bi : null, tobacco: twin ? !free : null, premium_annual: annual(rows, i) });
+          }
+        });
+        p.premium_annual = { ...p.premium_table[0].premium_annual };
+      });
       premFound = true;
       notes.push(`Premiums in the guide are per paycheck (${label}); converted to annual.`);
-      if (twin && twin.length === 2 * n) notes.push("The guide lists standard and tobacco-free premiums; HerePup used the tobacco-free ones. If anyone covered uses tobacco, enter the standard premiums.");
-      const band = pl.find((l) => /^\$[\d,]+\s*(?:-|–|to)\s*\$[\d,]+$|^\$[\d,]+\s*\+$/.test(l));
-      if (band) notes.push(`Premiums in this guide depend on pay band. HerePup used the first band (${band}); if your pay is in a higher band, enter those premiums.`);
-      if (raw.ee_child && raw.ee_children) notes.push("The guide prices one child and two or more children separately; HerePup used the children rate for employee + children.");
-      if (raw.ee_sp_ch && raw.family) notes.push("The guide has a separate employee + spouse + one child rate; HerePup's family rate uses the full family level.");
+      if (bands || twin) {
+        // A plain sentence from the guide explaining how the band is set (skipped when the text is table residue).
+        const helpLine = (re) => { const all = pages.join("\n").split("\n").map((l) => l.trim()); const k = all.findIndex((l) => re.test(l) && !/\$/.test(l) && l.length >= 40 && /^[A-Z]/.test(l)); if (k < 0) return ""; let t = all[k]; if (!/[.!]$/.test(t) && all[k + 1] && !/\$/.test(all[k + 1])) t += " " + all[k + 1]; return t.slice(0, 260); };
+        premiumChoice = { bands, tobacco: !!twin, band: 0, tobacco_user: false, answered: false,
+          band_help: bands ? helpLine(/(computation period|eligible earnings|annual base|base (?:pay|salary)|salary as of|based on (?:your )?(?:annual )?(?:base )?(?:pay|salary|earnings))/i) : "",
+          tobacco_help: "" };
+        notes.push(`Premiums depend on ${[bands && "pay band", twin && "tobacco use"].filter(Boolean).join(" and ")}. HerePup will ask on the plan screen; until then it uses the ${bands ? `first band (${bands[0]})` : ""}${bands && twin ? " and " : ""}${twin ? "tobacco-free rates" : ""}.`);
+      }
+      const raw0 = blocks[0];
+      if (raw0.ee_child && raw0.ee_children) notes.push("The guide prices one child and two or more children separately; HerePup used the children rate for employee + children.");
+      if (raw0.ee_sp_ch && raw0.family) notes.push("The guide has a separate employee + spouse + one child rate; HerePup's family rate uses the full family level.");
       break;
     }
   }
@@ -649,7 +781,7 @@ export function detectPlans(pages, filename = "", layout = null) {
     }
   }
   plans.forEach((p) => { if (p.hsa_eligible && !hsaFound) p.flags.push("Employer HSA contribution amount is not stated in the guide. Enter it if you know it; it can change the answer."); });
-  return { plans, employer: employerGuess(pages, filename), notes, table_page: pi + 1 };
+  return { plans, employer: employerGuess(pages, filename), notes, table_page: pi + 1, premium_choice: premiumChoice };
 }
 
 // ------------------------------------------------------------------ FHIR ExplanationOfBenefit (CARIN Blue Button)

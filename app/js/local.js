@@ -31,6 +31,17 @@ function cleanPlan(p) {
   const cp = {}; for (const [k, v] of Object.entries(p.copays || {})) if (v != null && v !== "") cp[k] = num(v); p.copays = cp;
   const rx = Array.isArray(p.rx_copays) ? p.rx_copays : [];
   p.rx_copays = rx.length && rx.every((v) => v != null && v !== "") ? rx.map(num) : [];
+  // Drug tiers: a copay or a coinsurance share (0-1, entered as %) per tier, with optional min/max per fill.
+  const opt = (v) => (v == null || v === "" || Number.isNaN(Number(v)) ? null : Number(v));
+  const src = Array.isArray(p.rx_tiers) && p.rx_tiers.length ? p.rx_tiers : p.rx_copays.map((c) => ({ copay: c }));
+  const tiers = src.map((t) => {
+    t = t || {};
+    let coins = opt(t.coins); if (coins != null && coins > 1) coins /= 100;
+    return { copay: coins != null ? null : opt(t.copay), coins, min: opt(t.min), max: opt(t.max) };
+  });
+  while (tiers.length && tiers[tiers.length - 1].copay == null && tiers[tiers.length - 1].coins == null) tiers.pop();
+  p.rx_tiers = tiers;
+  p.rx_oop_ind = num(p.rx_oop_ind); p.rx_oop_fam = num(p.rx_oop_fam);
   p.flags = (p.flags || []).map(String);
   for (const k of ["premium_annual", "hsa_employer"]) { const d = p[k] && typeof p[k] === "object" ? p[k] : {}; p[k] = Object.fromEntries(TIERS.map((t) => [t, num(d[t])])); }
 }
@@ -58,7 +69,7 @@ function suggestPlan(obs, employers) {
 // Stop reading a scanned guide once every plan detail has been found (deductibles, premiums by level, Rx copays).
 const guideComplete = (pages) => {
   const d = R.detectPlans(pages);
-  return d.plans.length > 0 && d.notes.some((n) => n.startsWith("Premiums in the guide")) && d.plans.every((p) => p.rx_copays.length);
+  return d.plans.length > 0 && d.notes.some((n) => n.startsWith("Premiums in the guide")) && d.plans.every((p) => p.rx_copays.length || (p.rx_tiers || []).length);
 };
 async function readDoc(file, onProgress, stopWhen = null) {
   const name = (file.name || "").toLowerCase();
