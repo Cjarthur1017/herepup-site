@@ -50,6 +50,32 @@ const ALIASES = {
   member_resp: ["you owe", "patient responsibility", "member responsibility", "member_resp", "your cost", "you pay", "member owes"],
 };
 
+// Headers worded differently from the exact names above (Aetna: "Provider billed", "Your share/ Your Cost",
+// "Provider or facility name", "Prescription name", "Rx cost"). Used only for fields the exact names didn't find,
+// and each column is used once. Money first, so "Provider billed" is read as billed, not as the provider.
+const PATTERNS = [
+  ["allowed", /\b(allowed|negotiated|eligible|discounted|network price)\b/],
+  ["billed", /\b(billed|charges?|charged)\b/],
+  ["member_resp", /\b(your (share|cost|responsibility|part|portion)|you owe|you pay|paid by (you|member|patient)|(patient|member) (responsibility|owes|share|cost|pays))\b/],
+  ["plan_paid", /\b(plan paid|paid by (the )?plan|(insurance|insurer|plan) (paid|pays|payment)|benefit paid|amount paid)\b/],
+  ["rx_cost", /\b(rx|drug|prescription|medication) (cost|price|total|amount)\b/],
+  ["rx_name", /\b(prescription|drug|medication)( name)?\b/],
+  ["provider", /\b(provider|facility|doctor|physician|clinic|practice)\b/],
+  ["member", /\b(member|patient|family member|person)\b/],
+  ["date", /\bdate of service\b|\b(service|visit|fill|filled) date\b/],
+  ["category", /\b(claim type|service type|type|category)\b/],
+];
+const headKey = (h) => String(h || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+// "Janie (Child)" -> "Janie": the relationship some insurers add to the member's name.
+const RELATION = /\s*\((self|subscriber|employee|member|spouse|husband|wife|partner|domestic partner|child|son|daughter|dependent|dependant|other)\)\s*$/i;
+export const cleanMember = (s) => String(s || "").trim().replace(RELATION, "").trim();
+// "child" or "adult" from that label, so a new person can be added with the right role.
+export function relationOf(s) {
+  const m = String(s || "").trim().match(RELATION);
+  if (!m || /^other$/i.test(m[1])) return "";
+  return /child|son|daughter|dependen/i.test(m[1]) ? "child" : "adult";
+}
+
 export function csvRecords(text) {
   text = text.replace(/^﻿/, "");
   const out = []; let row = [], cell = "", q = false;
@@ -76,8 +102,15 @@ export function parseRecords(records) {
     const i = head.findIndex((h) => h && names.includes(h.toLowerCase()));
     if (i >= 0) cols[field] = i;
   }
+  const used = new Set(Object.values(cols)), keys = head.map(headKey);
+  for (const [field, re] of PATTERNS) {
+    if (field in cols) continue;
+    const i = keys.findIndex((k, j) => k && !used.has(j) && re.test(k));
+    if (i >= 0) { cols[field] = i; used.add(i); }
+  }
   const get = (r, f) => (cols[f] == null ? "" : r[cols[f]] ?? "");
   const isRx = "rx_number" in cols || "pharmacy" in cols;
+  let rxRows = 0;
   const rows = []; let skipped = 0, derived = 0;
   for (const r of records.slice(1)) {
     const d = normDate(get(r, "date"));
@@ -85,6 +118,12 @@ export function parseRecords(records) {
     let prov = String(get(r, "provider") || "").trim();
     let cat = String(get(r, "category") || "").trim().toLowerCase();
     let rxDrug = null, pharmacy = null, rxQty = null;
+    const rxName = String(get(r, "rx_name") || "").trim(), rxCost = money(get(r, "rx_cost"));
+    if (!isRx && (rxName || /pharm|prescription|\brx\b|\bdrug/.test(cat))) { // a prescription row in a mixed file
+      cat = "rx"; rxDrug = rxName || prov || null;
+      if (rxName) prov = prov ? `${rxName} (${prov})` : rxName;
+      rxRows++;
+    }
     if (isRx) {
       cat = "rx";
       const q = prov.match(/Quantity:\s*([\d.]+)/i); rxQty = q ? Number(q[1]) : null;
@@ -94,17 +133,21 @@ export function parseRecords(records) {
       pharmacy = ph || null;
       prov = ph ? `${prov} (${ph})` : prov;
     }
-    const billed = money(get(r, "billed")); let allowed = money(get(r, "allowed"));
+    let billed = money(get(r, "billed")), allowed = money(get(r, "allowed"));
     const paid = money(get(r, "plan_paid")), owe = money(get(r, "member_resp"));
+    if (billed == null && rxCost != null) billed = rxCost;
     if (allowed == null && paid != null && owe != null) { allowed = r2(paid + owe); derived++; }
+    else if (allowed == null && rxCost != null && cat === "rx") allowed = rxCost;
     const rxn = String(get(r, "rx_number") || "").trim();
-    const row = { id: isRx && rxn ? "rx-" + rxn : newId(), date: d, member: String(get(r, "member") || "").trim(), provider: prov,
+    const rel = relationOf(get(r, "member"));
+    const row = { id: isRx && rxn ? "rx-" + rxn : newId(), date: d, member: cleanMember(get(r, "member")), ...(rel ? { relation: rel } : {}), provider: prov,
       category: CATEGORIES.includes(cat) ? cat : classifyText(prov + " " + cat), billed, allowed, plan_paid: paid, member_resp: owe, needs_review: allowed == null };
     if (row.category === "rx") Object.assign(row, { rx_tier: inferRxTier(allowed), rx_drug: rxDrug, pharmacy, rx_qty: rxQty });
     rows.push(row);
   }
   const notes = [];
   if (derived) notes.push(`This file has no allowed amount. Allowed was set to plan paid plus what you owe for ${derived} row(s).`);
+  if (rxRows) notes.push(`${rxRows} prescription row(s): the Rx tier (1 generic, 2 preferred brand, 3 non-preferred) is a guess from the price. Change it in the table if you know it.`);
   if (isRx) notes.push("Pharmacy file: the Rx tier (1 generic, 2 preferred brand, 3 non-preferred) is a guess from the price. Change it in the table if you know it.");
   return { rows, skipped, mapped_columns: cols, notes };
 }

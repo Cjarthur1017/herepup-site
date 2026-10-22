@@ -315,7 +315,7 @@ function reviewTable() {
     ${(r.notes || []).map((n) => `<p class="muted">${esc(n)}</p>`).join("")}
     ${r.unreadable_pages ? `<div class="warn">${r.unreadable_pages} page(s) are scanned images and were not read.</div>` : ""}
     ${unnamedPicker(r)}
-    ${r.new_people && r.new_people.length ? `<div class="warn"><b>These people are not in your household yet:</b> ${r.new_people.map((n, k) => `<span style="margin-right:12px">${esc(n)} <select id="np-${k}" aria-label="Role for ${esc(n)}"><option value="adult">Adult</option><option value="child">Child</option></select></span>`).join("")}
+    ${r.new_people && r.new_people.length ? `<div class="warn"><b>These people are not in your household yet:</b> ${r.new_people.map((n, k) => { const kid = r.rows.some((x) => x.member === n && x.relation === "child"); return `<span style="margin-right:12px">${esc(n)} <select id="np-${k}" aria-label="Role for ${esc(n)}"><option value="adult">Adult</option><option value="child" ${kid ? "selected" : ""}>Child</option></select></span>`; }).join("")}
       <button class="btn small" data-act="add-people">Add them to my household</button></div>` : ""}
     ${(r.coverage || []).length || r.skipped ? `<p class="muted">${(r.coverage || []).map((c) => `Coverage: ${esc(c.plan || "plan")} (${esc(c.payor)}), from ${esc(c.start)}${c.end ? " to " + esc(c.end) : ""}.`).join(" ")}${r.skipped ? ` ${r.skipped} cancelled claim(s) left out.` : ""}</p>` : ""}
     ${(r.errors || []).map((e) => `<div class="warn">${esc(e)}</div>`).join("")}
