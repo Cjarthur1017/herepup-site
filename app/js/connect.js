@@ -225,14 +225,31 @@ function resourceName(url) {
 async function refusalReason(r) {
   const www = r.headers.get("WWW-Authenticate") || "";
   let t = ""; try { t = (await r.text()).trim(); } catch (e) { /* no body */ }
-  let why = "";
+  let why = "", codes = [];
   try {
     const j = JSON.parse(t);
+    codes = (j.issue || []).map((i) => i.code).filter(Boolean);
     why = (j.issue || []).map((i) => i.diagnostics || (i.details || {}).text || i.code).filter(Boolean).join("; ")
       || j.error_description || (typeof j.error === "string" ? j.error : "") || ((j.fault || {}).faultstring) || j.message || j.moreInformation || j.httpMessage || "";
   } catch (e) { if (t && !/^</.test(t)) why = t; }
   if (!why && www) why = www;
-  return String(why).replace(/\s+/g, " ").slice(0, 200);
+  why = String(why).replace(/\s+/g, " ").slice(0, 200);
+  // "Nothing here for this member", which some insurers (Aetna) send as a 401 rather than a 404.
+  const notFound = (r.status === 401 || r.status === 404) && (codes.includes("not-found") || /\bnot[- ]?found\b/i.test(why));
+  return { why, notFound };
+}
+
+// What the insurer's Coverage records say, in a line: plan names, kinds and whether they're current.
+export function coverageLine(resources) {
+  const cov = (resources || []).filter((r) => r && r.resourceType === "Coverage");
+  if (!cov.length) return "";
+  const one = (c) => {
+    const cls = (c.class || []).map((k) => k.name || k.value).filter(Boolean);
+    const kind = ((c.type || {}).text || ((c.type || {}).coding || []).map((x) => x.display || x.code).filter(Boolean)[0] || "");
+    const span = c.period ? [c.period.start, c.period.end].filter(Boolean).join(" to ") : "";
+    return [cls.join(", ") || kind || "a plan", c.status, span].filter(Boolean).join(", ");
+  };
+  return `${cov.length} coverage record${cov.length === 1 ? "" : "s"}: ${cov.slice(0, 4).map(one).join("; ")}`;
 }
 
 // Patient, Coverage and every page of ExplanationOfBenefit, plus referenced providers that weren't included.
@@ -247,7 +264,8 @@ export async function pull(cid, onProgress = () => {}) {
     while (url && maxPages-- > 0) {
       const r = await fhirGet(cid, ep, cfg, url, tok.access_token, what);
       if (!r.ok) {
-        const part = resourceName(url), why = await refusalReason(r);
+        const part = resourceName(url), { why, notFound } = await refusalReason(r);
+        if (notFound) { const e = new Error(`${c.name} found no ${part} records (${r.status}${why ? `: ${why}` : ""}).`); e.status = r.status; e.notFound = true; throw e; }
         if (r.status === 401) {
           disconnect(cid);
           const mins = tok.signed_at ? Math.round((Date.now() - tok.signed_at) / 60000) : null;
@@ -274,7 +292,16 @@ export async function pull(cid, onProgress = () => {}) {
     if (!c.noPatient) got.push(...await tolerant(path(`Patient/${encodeURIComponent(pid)}`), 1, "Member"));
     got.push(...await tolerant(path("Coverage", `beneficiary=${encodeURIComponent("Patient/" + pid)}`), 40, "Coverage"));
   }
-  const eobs = await getAll(path("ExplanationOfBenefit", pid ? `patient=${encodeURIComponent(pid)}` : ""));
+  // Ask for claims the usual way; if the insurer says "not found", try the other standard forms before concluding
+  // it has none to share for this member (plans outside the Patient Access rule often sign in fine and return nothing).
+  const asks = pid ? [`patient=${encodeURIComponent(pid)}`, `patient=${encodeURIComponent("Patient/" + pid)}`, ""] : [""];
+  let eobs = null, none = null;
+  for (const q of asks) {
+    try { eobs = await getAll(path("ExplanationOfBenefit", q)); if (eobs.length || !q) break; }
+    catch (e) { if (!e.notFound) throw e; none = e; }
+  }
+  if (!eobs) eobs = [];
+  if (!eobs.length && none) notes.push(none.message);
   got.push(...eobs);
   const have = new Set(got.map((r) => `${r.resourceType}/${r.id}`)), refs = new Set();
   for (const e of eobs) for (const ref of [e.provider, ...(e.careTeam || []).map((ct) => ct.provider)]) {

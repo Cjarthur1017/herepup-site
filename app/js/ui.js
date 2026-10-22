@@ -423,14 +423,17 @@ async function cxPull(cid) {
   setBusy("claims", `Fetching your claims from ${c.name}...`);
   try {
     const got = await CX.pull(cid, (t) => setBusy("claims", t));
-    if (!got.eobs) {
-      fetchEnd("claims", false, `${c.name} returned no claims for this member.`);
-      S.busy = ""; S.msg = `${c.name} signed you in but returned no claims. ${c.covers}${got.notes.length ? " " + got.notes.join(" ") : ""}`;
-      render(); return;
-    }
     const bundle = { resourceType: "Bundle", type: "collection", entry: got.resources.map((r) => ({ resource: r })) };
     const file = new File([JSON.stringify(bundle)], `${c.name} ${got.env} claims.json`, { type: "application/json" });
     S.cxRaw = { cid, name: `HerePup - ${c.name} ${got.env} - what ${c.name} sent.json`, file }; // kept in memory only, for the download link
+    if (!got.eobs) {
+      const cov = CX.coverageLine(got.resources), member = got.resources.some((r) => r.resourceType === "Patient");
+      fetchEnd("claims", false, `${c.name} returned no claims for this member.`);
+      S.busy = ""; S.msg = `${c.name} signed you in${member || cov ? ` and shared ${[member ? "your member record" : "", cov].filter(Boolean).join(" and ")}` : ""}, but has no claims it will share through this connection. `
+        + `${c.covers} You can still download your claims from ${c.name}'s member site and drop them in (steps on the right).`
+        + `${got.notes.length ? ` Details: ${got.notes.join(" ")}` : ""}`;
+      render(); return;
+    }
     await handleFiles([file], "claims", null, `${c.name} (${got.env})`);
     if (c.askMember && S.review) { // no name comes back from this insurer: the claims belong to the person chosen before connecting
       const mid = CX.settings(cid).member_id;
