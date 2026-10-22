@@ -231,6 +231,20 @@ async function loadPdfJs() {
   return pdfjs;
 }
 
+// One page as a JPEG data URL, to show the person the page HerePup thinks holds the plan chart.
+export async function renderPage(file, pageNo, width = 900) {
+  const lib = await loadPdfJs();
+  const doc = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false }).promise;
+  try {
+    const pg = await doc.getPage(pageNo), vp0 = pg.getViewport({ scale: 1 }), vp = pg.getViewport({ scale: width / vp0.width });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.ceil(vp.width); canvas.height = Math.ceil(vp.height);
+    const ctx = canvas.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await pg.render({ canvasContext: ctx, viewport: vp }).promise;
+    return canvas.toDataURL("image/jpeg", 0.85);
+  } finally { await doc.destroy(); }
+}
+
 function linesFromContent(items) {
   const its = items.filter((i) => i.str && i.str.trim()).map((i) => ({ s: i.str, x: i.transform[4], y: i.transform[5], h: Math.abs(i.transform[3]) || i.height || 8, w: i.width }));
   its.sort((a, b) => b.y - a.y || a.x - b.x);
@@ -490,13 +504,13 @@ const COPAY_ROWS = [["office", /^(?:primary care |pcp |physician )?office visit|
 const yourShare = (v) => (v > 0.5 ? r2(1 - v) : v);
 const moneyList = (s) => [...s.matchAll(/\$\s?(\d[\d,]*(?:\.\d\d)?)/g)].map((m) => Number(m[1].replace(/,/g, "")));
 
+const NAMED = /(?:[A-Z][\w&'’-]*\s+){0,4}?(?:PPO|HMO|EPO|POS|HDHP|CDHP|HSA|HRA)(?:\s+(?:\d{1,4}|Plus|II|III))?\b|(?:[A-Z][\w&'’-]*\s+){1,4}?\d{2,4}(?!\d)/g;
 function findNames(lines, upto, n) {
   for (let k = upto; k >= 0; k--) {
     const names = [...lines[k].matchAll(/(?:[A-Z][\w\-]*\s+)+?Plan\b/g)].map((m) => m[0].replace(/^Medical\s+/, "").trim());
     if (names.length >= n) return names.slice(0, n);
   }
   // Names without the word Plan: "Consumer Choice 90", "PPO 85", "Kaiser HMO", "Gold PPO" (exactly one per column).
-  const NAMED = /(?:[A-Z][\w&'’-]*\s+){0,4}?(?:PPO|HMO|EPO|POS|HDHP|CDHP|HSA|HRA)(?:\s+(?:\d{1,4}|Plus|II|III))?\b|(?:[A-Z][\w&'’-]*\s+){1,4}?\d{2,4}(?!\d)/g;
   for (let k = upto; k >= Math.max(0, upto - 12); k--) {
     if (/\$|%/.test(lines[k])) continue;
     const names = [...lines[k].matchAll(NAMED)].map((m) => m[0].trim());
@@ -808,7 +822,7 @@ export function detectPlans(pages, filename = "", layout = null) {
     const n = Math.max(dedI.length, dedF.length, oopI.length, oopF.length);
     if (n && dedI.length && oopI.length && (!best || n > best.n)) best = { n, pi, lines, first, dedI, dedF, oopI, oopF, cols: cols && cols.includes("out") ? cols : null };
   });
-  if (!best) return { plans: [], employer: employerGuess(pages, filename), notes: ["No plan comparison table (deductible and out-of-pocket by plan) was found in this document."] };
+  if (!best) return { plans: [], employer: employerGuess(pages, filename), candidates: findPlanPages(pages), notes: ["No plan comparison table (deductible and out-of-pocket by plan) was found in this document."] };
   const { n, pi, lines, first, dedI, dedF, oopI, oopF } = best;
   const names = findNames(lines, first, n);
   const text = lines.join("\n");
@@ -941,7 +955,7 @@ export function detectPlans(pages, filename = "", layout = null) {
       p.flags.push(`Drug costs were read from the guide${r.oopInd ? `, with a separate prescription out-of-pocket maximum of ${r.oopInd.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })} per person` : ""}. ${miss.length ? `The ${miss.join(" and ")} tier wasn't found, so it uses the medical deductible and coinsurance. ` : ""}Which tier each fill falls in is a guess until you set it.`);
     });
   }
-  let premFound = false, premiumChoice = null;
+  let premFound = false, premiumChoice = null, payAsked = false;
   for (const page of pages) {
     const pl = page.split("\n").map((l) => l.trim()).filter(Boolean);
     if (!/medical/i.test(page)) continue;
@@ -966,7 +980,7 @@ export function detectPlans(pages, filename = "", layout = null) {
       if (factor == null) {
         const elsewhere = pages.join("\n").match(/(\d{2})\s+pay\s*periods/i);
         if (elsewhere) { factor = +elsewhere[1]; label = `${elsewhere[1]} pay periods, stated elsewhere in the guide`; }
-        else { factor = 26; label = "assumed 26 pay periods (not stated)"; notes.push("The guide did not say how often premiums are deducted; 26 per year was assumed. Check the annual premiums."); }
+        else { factor = 26; label = "26 a year until you say how often you're paid"; payAsked = true; }
       }
       const annual = (rows, i) => { const o = { ee: 0, ee_sp: 0, ee_ch: 0, family: 0 }; for (const [t, v] of Object.entries(rows)) o[t] = r2(v[i] * factor); return o; };
       // Priced by headcount ("Employee + 1 / + 2 / + 3 or more"): keep each, keyed by people covered besides the employee.
@@ -1008,6 +1022,12 @@ export function detectPlans(pages, filename = "", layout = null) {
     }
   }
   if (!premFound) notes.push("No premium table by coverage level was found. Enter premiums by hand.");
+  // The guide prices per paycheck without saying how many paychecks a year: the plan step asks.
+  if (payAsked) {
+    premiumChoice = premiumChoice || { bands: null, tobacco: false, band: 0, tobacco_user: false, answered: false, band_help: "", tobacco_help: "" };
+    premiumChoice.pay = { periods: 26, base: 26, set: false };
+    premiumChoice.answered = false;
+  }
   // Employer HSA deposits: a table headed by the HSA plans' names with one row per coverage level.
   const hsaIdx = plans.map((p, i) => (p.hsa_eligible ? i : -1)).filter((i) => i >= 0);
   let hsaFound = false;
@@ -1051,6 +1071,76 @@ export function detectPlans(pages, filename = "", layout = null) {
   }
   plans.forEach((p) => { if (p.hsa_eligible && !hsaFound && !hsaFromTable) p.flags.push("Employer HSA contribution amount is not stated in the guide. Enter it if you know it; it can change the answer."); });
   return { plans, employer: employerGuess(pages, filename), notes, table_page: pi + 1, premium_choice: premiumChoice };
+}
+
+// ------------------------------------------------------------------ checking what was read
+// Things that don't add up in a plan as read (a deductible above the out-of-pocket maximum, premiums that fall as
+// coverage grows, two plans with identical numbers...). Each comes with the guide line the number came from, when
+// it can be found, so the person can compare. field: the plan field to fix, when one number is the likely culprit.
+const dollars = (v) => "$" + Math.round(Number(v) || 0).toLocaleString("en-US");
+function evidence(lines, v, re) {
+  if (!lines.length || !v) return "";
+  const want = dollars(v);
+  for (let j = 0; j < lines.length; j++) {
+    const [pg, l] = lines[j];
+    if (!l.includes(want)) continue;
+    const near = `${(lines[j - 1] || [])[1] || ""} ${l} ${(lines[j + 1] || [])[1] || ""}`;
+    if (!re || re.test(near)) return `Page ${pg}: "${l.length > 150 ? l.slice(0, 150) + "..." : l}"`;
+  }
+  return "";
+}
+export function checkPlans(plans, pages = null) {
+  const lines = pages ? pages.flatMap((t, k) => String(t).split("\n").map((l) => [k + 1, l.trim()])).filter(([, l]) => l) : [];
+  const out = [], DED = /deductible/i, OOP = /out[- ]of[- ]pocket/i;
+  const FIELDS = { ded_pair: ["deductible_ind", "deductible_fam"], hsa_ded: ["deductible_ind"], deductible_ind: ["deductible_ind", "oop_ind"], deductible_fam: ["deductible_fam", "oop_fam"], oop_fam: ["oop_ind", "oop_fam"], oop_ind: ["oop_ind", "oop_fam"], coinsurance: ["coinsurance"] };
+  const add = (plan, field, text, ev = "") => out.push({ plan, field, fields: FIELDS[field] || [], text, evidence: ev });
+  plans.forEach((p, i) => {
+    const nm = p.name || `Plan ${i + 1}`, pa = p.premium_annual || {};
+    if (p.deductible_ind > 0 && p.oop_ind > 0 && p.deductible_ind > p.oop_ind)
+      add(i, "deductible_ind", `${nm}: the deductible (${dollars(p.deductible_ind)}) is higher than the out-of-pocket maximum (${dollars(p.oop_ind)}). One of them was probably read from the wrong row.`, evidence(lines, p.deductible_ind, DED));
+    if (p.deductible_fam > 0 && p.oop_fam > 0 && p.deductible_fam > p.oop_fam)
+      add(i, "deductible_fam", `${nm}: the family deductible (${dollars(p.deductible_fam)}) is higher than the family out-of-pocket maximum (${dollars(p.oop_fam)}).`, evidence(lines, p.deductible_fam, DED));
+    if (p.deductible_ind > 0 && p.deductible_fam > 0 && p.deductible_fam < p.deductible_ind)
+      add(i, "ded_pair", `${nm}: the family deductible (${dollars(p.deductible_fam)}) is lower than the individual one (${dollars(p.deductible_ind)}). They may be swapped.`, evidence(lines, p.deductible_fam, DED));
+    if (p.oop_ind > 0 && p.oop_fam > 0 && p.oop_fam < p.oop_ind)
+      add(i, "oop_fam", `${nm}: the family out-of-pocket maximum (${dollars(p.oop_fam)}) is lower than the individual one (${dollars(p.oop_ind)}). They may be swapped.`, evidence(lines, p.oop_fam, OOP));
+    if (!(p.oop_ind > 0) && !(p.oop_fam > 0))
+      add(i, "oop_ind", `${nm}: no out-of-pocket maximum was read. Every plan has one; enter it from the guide.`);
+    if (p.coinsurance > 0.5)
+      add(i, "coinsurance", `${nm}: your coinsurance reads as ${Math.round(p.coinsurance * 100)}%. That's unusually high for in-network care; the guide may show what the plan pays instead.`);
+    if (p.hsa_eligible && p.deductible_ind > 0 && p.deductible_ind < 1000)
+      add(i, "hsa_ded", `${nm}: marked HSA-eligible, but its deductible (${dollars(p.deductible_ind)}) is too low for an HSA plan. Check whether it really comes with an HSA, and the deductible.`, evidence(lines, p.deductible_ind, DED));
+    const lv = [pa.ee, pa.ee_sp, pa.ee_ch, pa.family].map(Number);
+    if (lv[0] > 0 && ((lv[1] > 0 && lv[1] < lv[0]) || (lv[2] > 0 && lv[2] < lv[0]) || (lv[3] > 0 && lv[3] < Math.max(lv[1] || 0, lv[2] || 0))))
+      add(i, "premium", `${nm}: premiums don't rise with coverage (employee only ${dollars(lv[0])}, family ${dollars(lv[3])}). Columns may have been read in the wrong order; check them against the guide.`);
+    const bc = Object.entries(p.premium_by_count || {}).sort((a, b) => a[0] - b[0]).map(([, v]) => Number(v));
+    if (bc.length && [lv[0] || 0, ...bc].some((v, k, a) => k && v > 0 && v < a[k - 1]))
+      add(i, "premium", `${nm}: premiums don't rise with the number of people covered. Check them against the guide.`);
+    if (p.copays && p.copays.er > 0 && p.copays.office > 0 && p.copays.er < p.copays.office)
+      add(i, "copays", `${nm}: the ER copay (${dollars(p.copays.er)}) is lower than the office visit copay (${dollars(p.copays.office)}). They may be swapped.`);
+  });
+  const key = (p) => [p.deductible_ind, p.deductible_fam, p.oop_ind, p.oop_fam, p.coinsurance, (p.premium_annual || {}).ee].join("|");
+  for (let i = 0; i < plans.length; i++) for (let j = i + 1; j < plans.length; j++)
+    if (plans[i].deductible_ind > 0 && key(plans[i]) === key(plans[j]))
+      add(j, "", `${plans[i].name} and ${plans[j].name} have exactly the same numbers. The guide may list one plan twice, or a column may have been read twice.`);
+  return out;
+}
+
+// When no plan chart could be read: the pages most likely to hold it, best first, with the plan names each shows.
+export function findPlanPages(pages) {
+  const W = [[/deductible/gi, 3], [/out[- ]of[- ]pocket/gi, 3], [/coinsurance/gi, 2], [/co-?pay/gi, 2], [/\b(?:PPO|HMO|EPO|POS|HDHP|HSA)\b/g, 1], [/per pay ?(?:period|check)|premium|contribution/gi, 1]];
+  return pages.map((t, k) => {
+    const text = String(t || "");
+    let score = W.reduce((s, [re, w]) => s + Math.min((text.match(re) || []).length, 6) * w, 0);
+    score += Math.min((text.match(/\$\s?\d/g) || []).length, 30) / 5;
+    let names = [];
+    for (const l of text.split("\n")) {
+      if (/[$%]/.test(l)) continue;
+      const m = [...l.matchAll(NAMED)].map((x) => x[0].trim());
+      if (m.length > names.length && m.length <= 6 && new Set(m).size === m.length) names = m;
+    }
+    return { page: k + 1, score: Math.round(score * 10) / 10, names: names.length >= 2 ? names : [] };
+  }).filter((c) => c.score >= 8).sort((a, b) => b.score - a.score).slice(0, 3);
 }
 
 // ------------------------------------------------------------------ FHIR ExplanationOfBenefit (CARIN Blue Button)

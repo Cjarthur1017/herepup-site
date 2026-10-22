@@ -7,25 +7,41 @@ import { mountTimeline } from "./timeline-view.js";
 import * as CX from "./connect.js";
 import { history as claimHistory } from "./years.js";
 import * as B from "./bills.js";
-import { pdfPages } from "./readers.js";
+import { pdfPages, checkPlans, renderPage, planHints } from "./readers.js";
 const CX_TEST = CX.testMode(); // direct insurer connections, in testing: /app/?connect=test
 const cxCheck = {};
 const STEPS = ["Household", "Plan documents", "Claims", "Your answer", "Your spending"];
 const TIERS = [["ee", "Employee only"], ["ee_sp", "Employee + spouse"], ["ee_ch", "Employee + children"], ["family", "Family"]];
 const byCount = (p) => { const bc = p && p.premium_by_count; const e = bc ? Object.entries(bc).filter(([k]) => /^[1-9]$/.test(k)).sort((a, b) => a[0] - b[0]) : []; return e.length ? e : null; };
 const TIER_WORDS = { ee: "employee only", ee_sp: "employee + spouse", ee_ch: "employee + children", family: "family" };
-const S = { step: 0, members: [], employers: [], currentPlan: "", saved: { claims: 0 }, review: null, hints: {}, detected: [], preview: null, settings: {}, drag: "", insurer: "", spending: null, busy: "", analysis: null, timeline: null, answerTab: "year", spendTab: "spend", billForm: { estimate: { selfPay: "yes" }, surprise: { kind: "emergency" }, md: { er: "no", told: "unsure", signed: "unsure" }, cash: { meetDed: "no" } }, billRes: {}, billTool: "", billNoticed: null, billChecks: null, billAmounts: {}, hsaGate: false, mult: 1, hsa: true, msg: "", err: "" };
+const S = { step: 0, members: [], employers: [], currentPlan: "", saved: { claims: 0 }, review: null, hints: {}, detected: [], preview: null, settings: {}, drag: "", insurer: "", spending: null, busy: "", analysis: null, timeline: null, answerTab: "year", spendTab: "spend", billForm: { estimate: { selfPay: "yes" }, surprise: { kind: "emergency" }, md: { er: "no", told: "unsure", signed: "unsure" }, cash: { meetDed: "no" } }, billRes: {}, billTool: "", billNoticed: null, billChecks: null, billAmounts: {}, guideMiss: [], hsaGate: false, mult: 1, hsa: true, msg: "", err: "" };
 const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const usd = (n) => (n == null ? "" : (n < 0 ? "-$" : "$") + Math.abs(Math.round(n)).toLocaleString("en-US"));
 const uid = () => Math.random().toString(36).slice(2, 8);
 // Anonymous step counts (see /privacy/#usage): only the step's name is sent, once per page load. Never any data.
-const STEP_EVENTS = new Set(["Plan added", "Claims added", "Answer shown", "Month by month opened", "Feedback clicked", "Check a bill opened", "Bill checked"]);
+const STEP_EVENTS = new Set(["Plan added", "Claims added", "Answer shown", "Month by month opened", "Feedback clicked", "Check a bill opened", "Bill checked", "Guide sent"]);
 const tracked = new Set();
 function track(name) {
   if (!STEP_EVENTS.has(name) || tracked.has(name)) return;
   tracked.add(name);
   try { if (typeof window.plausible === "function") window.plausible(name); } catch (e) { /* counting must never break the app */ }
+}
+// How a benefit guide read, so we learn which layouts fail: full, partial or no table, and which kinds of detail were
+// missing. Never the file name, the employer, plan names or any amount. Sent for every guide (see /privacy/#usage).
+function trackGuide(det) {
+  try {
+    if (typeof window.plausible !== "function") return;
+    const ps = det.plans || [], missing = [];
+    if (ps.length) {
+      if (!ps.some((p) => Object.values(p.premium_annual || {}).some(Number))) missing.push("premiums");
+      if (!ps.some((p) => (p.rx_tiers || []).length || (p.rx_copays || []).length)) missing.push("prescriptions");
+      if (ps.some((p) => p.hsa_eligible) && !ps.some((p) => Object.values(p.hsa_employer || {}).some(Number))) missing.push("HSA deposits");
+    }
+    const checks = (det.checks || []).length > 0;
+    const result = !ps.length ? "no table" : missing.length || checks ? "partial" : "full";
+    window.plausible("Guide read", { props: { result, missing: missing.join(", ") || "none", checks: checks ? "yes" : "no" } });
+  } catch (e) { /* counting must never break the app */ }
 }
 const FEEDBACK = `<p class="feedback">Was this useful? <button type="button" class="linkbtn" data-act="feedback-open" data-track="Feedback clicked">Tell us how it went</button>. It takes a minute, and it goes straight to Chris at HerePup.</p>`;
 function openFeedback() {
@@ -104,6 +120,7 @@ function render() {
   const main = $("#main");
   const msg = (S.err ? `<div class="err" role="alert">${esc(S.err)}</div>` : "") + (S.msg ? `<div class="warn" role="status">${esc(S.msg)}</div>` : "");
   main.innerHTML = [stepHousehold, stepPlans, stepClaims, stepAnswer, stepSpending][S.step]() .replace("<!--MSG-->", msg);
+  if (S.step === 1) loadMissImages();
   if (S.step === 3 && !S.analysis) runAnalysis();
   if (S.step === 3 && S.analysis && S.answerTab === "month" && S.timeline) mountTimeline($("#timeline"), S.timeline, { mult: S.mult, countHsa: S.hsa });
   if (S.step === 4 && !S.spending && S.spendTab !== "bills") runSpending();
@@ -185,24 +202,28 @@ function applyPremiumChoice(e) {
   const c = e.premium_choice; if (!c) return;
   for (const p of e.plans) {
     const row = (p.premium_table || []).find((r) => (r.band == null || r.band === c.band) && (r.tobacco == null || r.tobacco === !!c.tobacco_user));
-    if (row) { p.premium_annual = { ...row.premium_annual }; if (row.premium_by_count) p.premium_by_count = { ...row.premium_by_count }; }
+    const k = c.pay ? c.pay.periods / c.pay.base : 1, scale = (o) => Object.fromEntries(Object.entries(o).map(([t, v]) => [t, Math.round(Number(v) * k * 100) / 100]));
+    if (row) { p.premium_annual = scale(row.premium_annual); if (row.premium_by_count) p.premium_by_count = scale(row.premium_by_count); }
   }
   S.analysis = null; S.timeline = null;
 }
 function premiumQuestions(e, ei) {
-  const c = e.premium_choice; if (!c || (!c.bands && !c.tobacco)) return "";
+  const c = e.premium_choice; if (!c || (!c.bands && !c.tobacco && !c.pay)) return "";
   const who = esc(e.name || "This employer");
   const what = [c.bands && "pay", c.tobacco && "tobacco use"].filter(Boolean).join(" and ");
+  const asks = [c.bands, c.tobacco, c.pay].filter(Boolean).length;
+  const PAY = [[52, "Every week (52 paychecks)"], [26, "Every two weeks (26 paychecks)"], [24, "Twice a month (24 paychecks)"], [12, "Once a month (12 paychecks)"]];
   return `<div class="card pc ${c.answered ? "" : "pc-open"}"><h2>Your premiums at ${who}</h2>
-    <p>${who}'s premiums depend on ${what}. Answer ${c.bands && c.tobacco ? "both questions" : "this"} so HerePup uses your rates. Your answers stay on this device.</p>
+    <p>${what ? `${who}'s premiums depend on ${what}. ` : ""}${c.pay ? `The guide lists premiums per paycheck but doesn't say how many paychecks there are in a year. ` : ""}Answer ${asks > 1 ? "these questions" : "this"} so HerePup uses your rates. Your answers stay on this device.</p>
+    ${c.pay ? `<label>How often are you paid?<select data-pc="pay" data-e="${ei}">${c.pay.set ? "" : `<option value="" selected>Choose how often</option>`}${PAY.map(([n, l]) => `<option value="${n}" ${c.pay.set && c.pay.periods === n ? "selected" : ""}>${l}</option>`).join("")}</select></label>` : ""}
     ${c.bands ? `<label>Which pay band are you in?<select data-pc="band" data-e="${ei}">${c.band_set ? "" : `<option value="" selected>Choose your pay band</option>`}${c.bands.map((b, i) => `<option value="${i}" ${c.band_set && i === c.band ? "selected" : ""}>${esc(b)}</option>`).join("")}</select></label>
       ${c.band_help ? `<p class="muted">From the guide: "${esc(c.band_help)}"</p>` : ""}` : ""}
     ${c.tobacco ? `<fieldset class="gate-q"><legend>Does anyone you'd cover use tobacco?</legend>
       <label class="radio"><input type="radio" name="pc-tob-${ei}" value="no" data-pc="tobacco" data-e="${ei}" ${c.tobacco_set && !c.tobacco_user ? "checked" : ""}>No one, or they'll complete the quit program (tobacco-free rates)</label>
       <label class="radio"><input type="radio" name="pc-tob-${ei}" value="yes" data-pc="tobacco" data-e="${ei}" ${c.tobacco_set && c.tobacco_user ? "checked" : ""}>Yes (standard rates)</label></fieldset>
       <p class="muted">Tobacco-free rates usually require that no one covered has used tobacco recently, or that they finish a quit program by a deadline. Your guide has the exact rule.</p>` : ""}
-    ${c.answered ? `<p class="muted">Premiums below now use ${c.bands ? `the ${esc(c.bands[c.band])} band` : ""}${c.bands && c.tobacco ? " and " : ""}${c.tobacco ? (c.tobacco_user ? "standard (tobacco) rates" : "tobacco-free rates") : ""}.</p>`
-      : `<p class="warn">Until you answer, premiums assume ${c.bands ? `the lowest band (${esc(c.bands[0])})` : ""}${c.bands && c.tobacco ? " and " : ""}${c.tobacco ? "tobacco-free rates" : ""}.</p>`}</div>`;
+    ${c.answered ? `<p class="muted">Premiums below now use ${[c.bands && `the ${esc(c.bands[c.band])} band`, c.tobacco && (c.tobacco_user ? "standard (tobacco) rates" : "tobacco-free rates"), c.pay && `${c.pay.periods} paychecks a year`].filter(Boolean).join(" and ")}.</p>`
+      : `<p class="warn">Until you answer, premiums assume ${[c.bands && `the lowest band (${esc(c.bands[0])})`, c.tobacco && "tobacco-free rates", c.pay && "26 paychecks a year"].filter(Boolean).join(" and ")}.</p>`}</div>`;
 }
 
 const hsaDone = () => S.employers.every((e) => e.plans.every((p) => p.hsa_checked));
@@ -213,6 +234,59 @@ const hsaSummary = (p) => {
 };
 const isBlankPlan = (p) => p.name === "New plan" && !p.deductible_ind && !p.oop_ind && !Object.values(p.premium_annual || {}).some(Number);
 // A guide dropped on one employer's card: its plan options go straight to that employer.
+// Checks on what was read, each with the guide's own line and boxes to fix the numbers before adding the plans.
+const FIX = { deductible_ind: "Deductible", deductible_fam: "Family deductible", oop_ind: "Out-of-pocket max", oop_fam: "Family out-of-pocket max", coinsurance: "Your coinsurance (%)" };
+function checksBox(d, di) {
+  const cs = d.checks || [];
+  if (!cs.length || !d.plans.length) return "";
+  return `<div class="warn checks"><b>Check ${cs.length === 1 ? "this" : `these ${cs.length} things`} before adding:</b><ul>${cs.map((c) => `<li>${esc(c.text)}
+    ${c.evidence ? `<br><span class="quote">From the guide: ${esc(c.evidence)}</span>` : ""}
+    ${c.plan != null && (c.fields || []).length ? `<div class="row fix">${c.fields.map((f) => { const v = d.plans[c.plan][f]; return `<label>${FIX[f]}<input type="number" min="0" step="any" data-detp="${di}:${c.plan}:${f}" value="${f === "coinsurance" ? Math.round((v || 0) * 1000) / 10 : v ?? ""}"></label>`; }).join("")}</div>` : ""}</li>`).join("")}</ul>
+    <p class="muted">Fix a number here and the check runs again. Anything you're unsure of, you can also change after adding.</p></div>`;
+}
+
+// A guide HerePup couldn't read: show the page that most likely holds the plans, and let the person enter them by
+// hand with that page in view. Never a dead end.
+const isPdfName = (n) => /\.pdf$/i.test(n || "");
+function missCard(m, mi) {
+  const c = m.candidates[m.at], img = c && m.img[c.page];
+  const names = c && c.names.length ? c.names : [];
+  return `<div class="card miss"><h2>HerePup couldn't read the plan chart in ${esc(m.name)}</h2>
+    ${c ? `<p>The plan options look like they're on <b>page ${c.page}</b>${names.length ? ` (${esc(names.join(", "))})` : ""}. ${m.manual ? "Type the numbers from this page into the plans below." : "Check this page, then enter the plans by hand. HerePup fills in the plan names and lists amounts it can see on the page."}</p>
+      ${isPdfName(m.name) ? `<div class="miss-page">${img ? `<img src="${img}" alt="Page ${c.page} of ${esc(m.name)}">` : m.imgErr && m.imgErr[c.page] ? `<p class="muted">This page couldn't be shown. Open page ${c.page} of your guide instead.</p>` : `<p class="muted">Loading page ${c.page}...</p>`}</div>` : ""}`
+    : `<p>HerePup couldn't tell which page lists the plans. Enter them by hand from the guide's plan comparison chart.</p>`}
+    <div class="row">${m.manual ? "" : `<button class="btn primary" data-act="miss-manual" data-i="${mi}">${names.length ? `Enter these ${names.length} plans by hand` : "Enter the plans by hand"}</button>`}
+      ${m.candidates.length > 1 ? `<button class="btn" data-act="miss-next" data-i="${mi}">Show another likely page</button>` : ""}
+      <button class="btn" data-act="miss-close" data-i="${mi}">${m.manual ? "Done, hide this page" : "Dismiss"}</button></div>
+    ${sendGuide("miss", mi)}</div>`;
+}
+function loadMissImages() {
+  for (const m of S.guideMiss) {
+    const c = m.candidates[m.at];
+    if (!c || !isPdfName(m.name) || m.img[c.page] || (m.imgErr && m.imgErr[c.page]) || m.loading === c.page) continue;
+    m.loading = c.page;
+    renderPage(m.file, c.page).then((url) => { m.img[c.page] = url; }).catch(() => { (m.imgErr ||= {})[c.page] = true; })
+      .finally(() => { m.loading = 0; if (S.step === 1) render(); });
+  }
+}
+
+// "Send this guide to HerePup": with the person's go-ahead, the guide goes to HerePup's sign-in helper, which keeps it
+// (at most 180 days) so the reader can learn its layout. Only the guide; never claims or anything else.
+const guideOwner = (kind, i) => (kind === "det" ? S.detected[i] : S.guideMiss[i]);
+function sendGuide(kind, i) {
+  const o = guideOwner(kind, i), file = o && (o.fileObj || o.file);
+  if (!file) return "";
+  const st = o.send || {};
+  if (st.done) return `<p class="muted"><span aria-hidden="true">&#10003;</span> Sent. Thank you: HerePup will learn this guide's layout, then delete the copy.</p>`;
+  if (!st.open) return `<p class="muted">${kind === "det" ? "Something read wrong? " : ""}<button type="button" class="linkbtn" data-act="guide-send-open" data-kind="${kind}" data-i="${i}">Send this guide to HerePup</button> so guides like it read correctly next time.</p>`;
+  if (st.unavailable) return `<p class="muted">Sending from the app isn't switched on yet. You can email the guide to <a href="mailto:chris@herepup.health?subject=A%20benefit%20guide%20HerePup%20didn't%20read">chris@herepup.health</a> instead.</p>`;
+  return `<div class="send-guide"><p>HerePup uses the guide only to teach the reader its layout, and deletes it once that's done (within 180 days at most). Nothing else from this device is sent.</p>
+    <label class="cx-consent"><input type="checkbox" data-guide-ok data-kind="${kind}" data-i="${i}" ${st.ok ? "checked" : ""}><span>This is my employer's general benefit guide. It doesn't show my name, employee ID, pay or anyone's health information.</span></label>
+    <div class="row"><button class="btn primary" data-act="guide-send" data-kind="${kind}" data-i="${i}" ${st.ok && !st.busy ? "" : "disabled"}>${st.busy ? "Sending..." : "Send the guide"}</button>
+    <button class="btn" data-act="guide-send-cancel" data-kind="${kind}" data-i="${i}">Cancel</button></div>
+    ${st.err ? `<p class="err">${esc(st.err)}</p>` : ""}</div>`;
+}
+
 function addGuideTo(ei, r, file) {
   const e = S.employers[ei]; if (!e) return;
   const d = r.detected || { plans: [] };
@@ -271,12 +345,14 @@ function stepPlans() {
     <button class="btn small danger" data-act="rm-employer" data-e="${ei}">Remove employer</button></div>
     ${dropZone(`plan:${ei}`, `Drop ${e.name || "this employer"}'s benefit guide here and we'll fetch the details`, "PDF, typed or scanned. HerePup adds every plan option it finds to this employer.", true)}
     ${premiumQuestions(e, ei)}
+    ${S.guideMiss.map((m, mi) => (m.ei === ei ? missCard(m, mi) : "")).join("")}
     ${e.plans.map((p, pi) => planCard(e, ei, p, pi)).join("")}
     <button class="btn" data-act="add-plan" data-e="${ei}">Add a plan option for ${esc(e.name || "this employer")}</button></section>`).join("");
   const cur = S.employers.flatMap((e, ei) => e.plans.map((p, pi) => `<option value="${e.id}:${pi}" ${S.currentPlan === `${e.id}:${pi}` ? "selected" : ""}>${esc(e.name)}: ${esc(p.name)}</option>`)).join("");
   const found = S.detected.map((d, di) => `<div class="card" style="border-color:#1F7A7A"><h2>${d.plans.length ? `Found ${d.plans.length} plan option(s) in ${esc(d.file)}` : `No plan table found in ${esc(d.file)}`}</h2>
     ${d.message ? `<div class="warn">${esc(d.message)}</div>` : ""}
     ${(d.notes || []).map((n) => `<p class="muted">${esc(n)}</p>`).join("")}
+    ${checksBox(d, di)}
     ${d.plans.length ? `<div class="scroll"><table><thead><tr><th>Plan</th><th>Deductible (person / family)</th><th>Out-of-pocket max</th><th>Visit copays</th><th>Drug tiers (generic / brand / non-preferred)</th><th>Premium per year (you / you+spouse / you+kids / family, or by people covered)</th></tr></thead><tbody>
       ${d.plans.map((p) => `<tr><td>${esc(p.name)}</td><td>${usd(p.deductible_ind)} / ${usd(p.deductible_fam)}</td><td>${usd(p.oop_ind)} / ${usd(p.oop_fam)}</td>
       <td>${p.copays && p.copays.office != null ? `${usd(p.copays.office)} / ${usd(p.copays.specialist)}${p.copay_after_ded ? " after deductible" : ""}` : "none found"}</td>
@@ -285,8 +361,9 @@ function stepPlans() {
     <div class="row" style="margin-top:12px"><label>Employer name<input id="det-emp-${di}" data-det="${di}" data-det-field="employer" value="${esc(d.employer || "")}"></label>
     <label>Who works there?<select id="det-sub-${di}" data-det="${di}" data-det-field="sub"><option value="">Choose...</option>${memberOpts(d.sub || "")}</select></label>
     <button class="btn primary" data-act="add-detected" data-i="${di}">Add this employer with these plans</button><button class="btn" data-act="clear-detected" data-i="${di}">Dismiss</button></div>
-    <p class="muted">You can edit every number after adding it. Flags under each plan list what to double-check.</p>` : `<div class="row"><button class="btn" data-act="clear-detected" data-i="${di}">Dismiss</button></div>`}</div>`).join("");
-  const uploadCard = dropZone("plan", "Drop your benefit guides here and we'll fetch the details", "PDF guides from each employer, typed or scanned. Drop several at once. HerePup finds every plan option in each one.") + found;
+    <p class="muted">You can edit every number after adding it. Flags under each plan list what to double-check.</p>${sendGuide("det", di)}` : `<div class="row"><button class="btn" data-act="clear-detected" data-i="${di}">Dismiss</button></div>`}</div>`).join("");
+  const misses = S.guideMiss.map((m, mi) => (m.ei == null ? missCard(m, mi) : "")).join("");
+  const uploadCard = dropZone("plan", "Drop your benefit guides here and we'll fetch the details", "PDF guides from each employer, typed or scanned. Drop several at once. HerePup finds every plan option in each one.") + misses + found;
   return `<h1>What plans can your household choose from?</h1><p class="lead">Drop in each employer's benefit guide. We read out the plan options, you confirm them.</p><!--MSG-->${uploadCard}${emps}
   <div class="row"><button class="btn" data-act="add-employer">Add an employer by hand</button></div>
   <div class="card"><label>Which plan were your uploaded claims actually processed under? (used to check how well we match your carrier)<select data-act="current-plan"><option value="">Not sure / skip</option>${cur}</select></label></div>
@@ -787,6 +864,46 @@ document.addEventListener("click", async (ev) => {
       S.detected.splice(di, 1); S.msg = `Added ${name} with ${d.plans.length} plan option(s). Review the numbers, then continue.`; render();
     }
     else if (act === "clear-detected") { S.detected.splice(+t.dataset.i, 1); render(); }
+    else if (act === "miss-next") { const m = S.guideMiss[+t.dataset.i]; if (m) { m.at = (m.at + 1) % m.candidates.length; render(); } }
+    else if (act === "miss-close") { S.guideMiss.splice(+t.dataset.i, 1); render(); }
+    else if (act === "miss-manual") {
+      // Plans named from the likely page, with the amounts HerePup can see there offered under each plan.
+      const m = S.guideMiss[+t.dataset.i]; if (!m) return;
+      const c = m.candidates[m.at], names = c && c.names.length ? c.names : ["Plan 1", "Plan 2"];
+      if (m.ei == null) { S.employers.push({ id: uid(), name: m.employer || "", subscriber: "", plans: [] }); m.ei = S.employers.length - 1; }
+      const e = S.employers[m.ei];
+      e.plans = e.plans.filter((p) => !isBlankPlan(p));
+      const start = e.plans.length;
+      e.plans.push(...names.map((n) => ({ ...newPlan(), name: n })));
+      const hints = planHints(c ? m.pages[c.page - 1] || "" : m.pages.join("\n"));
+      for (let pi = start; pi < e.plans.length; pi++) S.hints[`${m.ei}:${pi}`] = hints;
+      m.manual = true;
+      S.msg = `Added ${names.length} plan option(s)${e.name ? ` to ${e.name}` : ""}. Type each plan's numbers from page ${c ? c.page : "the plan chart"}; amounts HerePup could see are offered under each plan.`;
+      render();
+    }
+    else if (act === "guide-send-open") {
+      const o = guideOwner(t.dataset.kind, +t.dataset.i); if (!o) return;
+      o.send = { open: true }; render();
+      try { const h = await CX.helperInfo(CX.helperUrl()); if (!h.guides) o.send.unavailable = true; } catch (e) { o.send.unavailable = true; }
+      render();
+    }
+    else if (act === "guide-send-cancel") { const o = guideOwner(t.dataset.kind, +t.dataset.i); if (o) o.send = {}; render(); }
+    else if (act === "guide-send") {
+      const o = guideOwner(t.dataset.kind, +t.dataset.i), st = o && o.send;
+      if (!st || !st.ok || st.busy) return;
+      const file = o.fileObj || o.file;
+      st.busy = true; st.err = ""; render();
+      try {
+        const fd = new FormData();
+        fd.append("guide", file, file.name);
+        fd.append("result", t.dataset.kind === "miss" ? "no table" : (o.checks || []).length ? "checks" : "read wrong");
+        const r = await fetch(CX.helperUrl() + "/guide", { method: "POST", body: fd, credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer" });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error_description || `The guide couldn't be sent (${r.status}). Try again in a minute.`);
+        st.done = true; track("Guide sent");
+      } catch (e) { st.err = e.message || "The guide couldn't be sent. Try again in a minute."; }
+      st.busy = false; render();
+    }
     else if (act === "add-people") {
       const add = S.review.new_people.map((n, k) => ({ id: uid(), name: n.split(" ")[0].charAt(0).toUpperCase() + n.split(" ")[0].slice(1).toLowerCase(), role: $("#np-" + k).value }));
       const have = new Set(S.members.map((m) => m.name.toLowerCase()));
@@ -853,8 +970,8 @@ document.addEventListener("click", async (ev) => {
       if (!S.employers.length) throw new Error("Add at least one employer.");
       for (const e of S.employers) { if (!e.name.trim()) throw new Error("Give each employer a name."); if (!e.subscriber) throw new Error(`Choose who works at ${e.name}.`); }
       if (!S.employers.some((e) => e.plans.length)) throw new Error("Add at least one plan option.");
-      const open = S.employers.find((e) => e.premium_choice && (e.premium_choice.bands || e.premium_choice.tobacco) && !e.premium_choice.answered);
-      if (open) throw new Error(`Answer the premium questions for ${open.name} first: its premiums depend on ${[open.premium_choice.bands && "your pay band", open.premium_choice.tobacco && "tobacco use"].filter(Boolean).join(" and ")}.`);
+      const open = S.employers.find((e) => e.premium_choice && (e.premium_choice.bands || e.premium_choice.tobacco || e.premium_choice.pay) && !e.premium_choice.answered);
+      if (open) throw new Error(`Answer the premium questions for ${open.name} first: its premiums depend on ${[open.premium_choice.bands && "your pay band", open.premium_choice.tobacco && "tobacco use", open.premium_choice.pay && "how often you're paid"].filter(Boolean).join(" and ")}.`);
       await saveEmployers(); S.hsaGate = true; render(); window.scrollTo(0, 0);
     }
     else if (act === "reparse") {
@@ -938,10 +1055,14 @@ async function readFiles(files, zone, order, title = "") {
         const m = /page (\d+) of (\d+)/i.exec(p), steps = m ? +m[2] * files.length : files.length;
         setBusy(zone, `${f.name}: ${p}`, m && steps >= 3 ? (i + (+m[1] - 0.5) / +m[2]) / files.length : files.length > 1 ? i / files.length : null);
       });
-      if (kind === "plan") found += ((r.detected || {}).plans || []).length;
-      if (kind === "plan" && zone.startsWith("plan:")) addGuideTo(+zone.split(":")[1], r, f.name);
-      else if (kind === "plan") {
-        S.detected.push({ ...r.detected, message: r.message, file: f.name });
+      if (kind === "plan") {
+        const det = r.detected || { plans: [] };
+        found += (det.plans || []).length;
+        trackGuide(det);
+        const onEmp = zone.startsWith("plan:") ? +zone.split(":")[1] : null;
+        if (!det.plans.length && !r.message) S.guideMiss.push({ name: f.name, file: f, pages: r.pages || [], candidates: det.candidates || [], at: 0, ei: onEmp, employer: det.employer || "", img: {}, manual: false });
+        if (onEmp != null) addGuideTo(onEmp, r, f.name);
+        else if (det.plans.length || r.message) S.detected.push({ ...det, message: r.message, file: f.name, fileObj: f, pages: r.pages || [] });
       } else results.push(r);
     } catch (e) { errors.push(e.message || String(e)); }
   }
@@ -986,6 +1107,14 @@ document.addEventListener("change", async (ev) => {
       S.analysis = null; S.timeline = null; render(); return;
     }
     if (t.dataset.det !== undefined) { const d = S.detected[+t.dataset.det]; if (d) d[t.dataset.detField] = t.value; return; }
+    if (t.dataset.detp) { // a fix typed into a check: update the plan and run the checks again
+      const [di, pi, f] = t.dataset.detp.split(":"), d = S.detected[+di]; if (!d || !d.plans[+pi]) return;
+      const v = t.value === "" ? 0 : Number(t.value);
+      d.plans[+pi][f] = f === "coinsurance" ? v / 100 : v;
+      d.checks = checkPlans(d.plans, d.pages);
+      render(); return;
+    }
+    if (t.dataset.guideOk !== undefined) { const o = guideOwner(t.dataset.kind, +t.dataset.i); if (o && o.send) { o.send.ok = t.checked; render(); } return; }
     if (t.dataset.act === "drop-pick" && t.files.length) { const fl = [...t.files]; t.value = ""; await handleFiles(fl, t.dataset.kind); return; }
     if (t.dataset.act === "guide-file" && t.files[0]) {
       S.err = ""; S.detected = null; S.busy = "Reading " + t.files[0].name + ". Scanned guides can take a minute or two..."; render();
@@ -1022,7 +1151,8 @@ document.addEventListener("change", async (ev) => {
       const e = S.employers[+t.dataset.e], c = e && e.premium_choice; if (!c) return;
       if (t.dataset.pc === "band" && t.value !== "") { c.band = +t.value; c.band_set = true; }
       if (t.dataset.pc === "tobacco") { c.tobacco_user = t.value === "yes"; c.tobacco_set = true; }
-      c.answered = (!c.bands || !!c.band_set) && (!c.tobacco || !!c.tobacco_set);
+      if (t.dataset.pc === "pay" && t.value !== "" && c.pay) { c.pay.periods = +t.value; c.pay.set = true; }
+      c.answered = (!c.bands || !!c.band_set) && (!c.tobacco || !!c.tobacco_set) && (!c.pay || !!c.pay.set);
       applyPremiumChoice(e); render(); return;
     }
     if (t.dataset.bind) {

@@ -103,7 +103,9 @@ export async function upload(file, kind, order = null, onProgress = () => {}) {
     let message = "";
     if (!det.plans.length && R.parseCignaEob(doc.pages).rows.length) message = `${file.name} looks like an explanation of benefits, not a benefit guide. Add it on the Claims step.`;
     else if (doc.unreadable_pages && !det.plans.length) message = `${doc.unreadable_pages} scanned page(s) could not be read${doc.ocr_error ? ` (${doc.ocr_error})` : ""}. Type the plan numbers by hand instead.`;
-    return { kind, detected: det, hints: R.planHints(doc.pages.join("\n")), message, scanned_pages: doc.scanned_pages, ocr_pages: doc.ocr_pages, unreadable_pages: doc.unreadable_pages };
+    det.checks = R.checkPlans(det.plans, doc.pages);
+    // pages: the guide's text, kept in memory for the checks' quotes and the "plans look like they're on page 8" view.
+    return { kind, detected: det, pages: doc.pages, hints: R.planHints(doc.pages.join("\n")), message, scanned_pages: doc.scanned_pages, ocr_pages: doc.ocr_pages, unreadable_pages: doc.unreadable_pages };
   }
   let res;
   if (kind === "eob") {
