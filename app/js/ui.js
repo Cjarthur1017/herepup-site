@@ -373,7 +373,9 @@ function cxCheckLine(cid, env) {
   if (r.token === true && r.fhir) return `<p class="cx-check ok" id="cx-check"><span aria-hidden="true">&#10003;</span> ${r.helper
     ? `HerePup's sign-in helper is ready, and ${name}'s claims server accepts connections from this browser.`
     : `${name}'s sign-in and claims servers both accept connections from this browser.`}</p>`;
-  const signin = r.helper ? `HerePup's sign-in helper: ${r.token === "not-set-up" ? `<b>not set up for ${name} ${esc(env)} yet</b>` : r.token ? "ready" : "<b>unreachable</b>"}`
+  if (r.token === true && r.relay) return `<p class="cx-check ok" id="cx-check"><span aria-hidden="true">&#10003;</span> HerePup's sign-in helper is ready.
+    ${name} doesn't let web pages read claims directly, so the helper will pass them straight to this browser without keeping them.</p>`;
+  const signin = r.helper ? `HerePup's sign-in helper: ${r.token === "not-set-up" ? `<b>not set up for ${name} ${esc(env)} yet</b>` : r.token ? "ready" : "<b>unreachable</b>"}${r.relay ? " (it can also pass claims through)" : ""}`
     : `${name}'s sign-in server: ${r.token ? "reachable" : "<b>blocked</b>"}`;
   return `<p class="cx-check warn" id="cx-check"><b>Not everything is reachable from this browser.</b> ${signin}. ${name}'s claims server: ${r.fhir ? "reachable" : "<b>blocked</b>"}.
     ${r.fhir ? "" : `${name} may not allow browser connections (CORS), or an extension blocked it. `}You can still try; HerePup will say exactly where it stops.</p>`;
@@ -396,8 +398,8 @@ function connectPanel(cid) {
     : `${consent}<div class="row"><button class="btn primary" data-act="cx-connect" data-cid="${cid}">Connect to ${esc(c.name)}</button></div>`;
   const site = INSURERS.find((x) => x.id === cid) || {};
   return `<div class="cx" id="cx-panel"><h3>Connect to ${esc(c.name)} <span class="pill">Testing</span></h3>
-    <p class="muted">Sign in at ${esc(c.name)} and your claims come straight into this browser. ${helper
-      ? "Only the one-time sign-in step goes through HerePup's sign-in helper, which keeps nothing." : "Nothing passes through HerePup."}</p>
+    <p class="muted">Sign in at ${esc(c.name)} and your claims come into this browser. ${helper
+      ? `The sign-in step goes through HerePup's sign-in helper, and if ${esc(c.name)} doesn't let web pages read claims directly, the helper passes them straight through too. It keeps and logs nothing.` : "Nothing passes through HerePup."}</p>
     ${site.register ? `<p class="muted">You'll sign in with your ${esc(c.name)} member account (the one for <a href="${esc(site.member)}" target="_blank" rel="noopener">${esc(new URL(site.member).host)}</a>). No account yet? <a href="${esc(site.register)}" target="_blank" rel="noopener">Create one</a> with the member ID on your insurance card, then come back and connect.</p>` : ""}
     ${Object.keys(c.envs).length > 1 ? `<label>Which data<select data-cx="env" data-cid="${cid}">${envs}</select></label>` : `<p class="muted">${esc(c.envs[ep.env].label)}</p>`}
     ${c.askMember ? `<label style="margin-top:8px">Whose ${esc(c.name)} is this?<select data-cx="member_id" data-cid="${cid}"><option value="">Choose a person...</option>${S.members.map((m) => `<option value="${esc(m.id)}" ${cfg.member_id === m.id ? "selected" : ""}>${esc(m.name)}</option>`).join("")}</select></label>` : ""}

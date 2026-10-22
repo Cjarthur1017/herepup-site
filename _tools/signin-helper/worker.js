@@ -1,18 +1,24 @@
 // HerePup sign-in helper (a Cloudflare Worker).
 //
-// One job: after a member signs in at their insurer, the web app sends the one-time sign-in code here. The helper
-// adds HerePup's client secret (a public website can't keep one), trades the code for an access token at the
-// insurer, and hands the insurer's answer straight back to the member's browser. It stores nothing and logs
-// nothing. Claims never pass through here: the browser fetches them from the insurer directly.
+// Two jobs, both for insurers that don't let a web page do them itself:
+//  1. /token: after a member signs in at their insurer, the web app sends the one-time sign-in code here. The helper
+//     adds HerePup's client secret (a public website can't keep one), trades the code for an access token at the
+//     insurer, and hands the insurer's answer straight back to the member's browser.
+//  2. /fhir: some insurers (Aetna production) don't let a web page read the member's claims directly (CORS). The web
+//     app then sends the insurer address it wants and the member's own access token here; the helper makes that one
+//     read-only request and streams the insurer's reply straight back. It never adds HerePup's secret to these
+//     requests, so it can't read anything the member's own token couldn't.
+// It stores nothing and logs nothing: no code, token or claim is written anywhere.
 //
 // Guard rails: it answers only pages on herepup.health, only for the callback https://herepup.health/app/callback/,
-// and only ever calls the insurer token addresses listed below. It is not a general-purpose proxy.
+// and only ever calls the insurer token and claims addresses listed below (GET only for claims, no redirects
+// followed). It is not a general-purpose proxy. Keep Workers Logs / Logpush off for this Worker.
 //
 // Settings (Cloudflare: Workers & Pages > herepup-signin > Settings > Variables and Secrets):
 //   AETNA_SANDBOX_CLIENT_ID     Text     client ID of the Aetna sandbox app (not secret; the web app reads it from /health)
 //   AETNA_SANDBOX_SECRET        Secret   that app's client secret
-//   AETNA_PRODUCTION_CLIENT_ID  Text     later, once Aetna approves production
-//   AETNA_PRODUCTION_SECRET     Secret   later
+//   AETNA_PRODUCTION_CLIENT_ID  Text     Aetna production app
+//   AETNA_PRODUCTION_SECRET     Secret   its client secret
 //   MEDICARE_SANDBOX_CLIENT_ID  Text     CMS Blue Button 2.0 sandbox app (Original Medicare)
 //   MEDICARE_SANDBOX_SECRET     Secret   its client secret
 //   MEDICARE_PRODUCTION_...     later, once CMS approves production access
@@ -24,8 +30,30 @@ const TOKEN_URLS = {
   "medicare:sandbox": "https://sandbox.bluebutton.cms.gov/v2/o/token/",
   "medicare:production": "https://api.bluebutton.cms.gov/v2/o/token/",
 };
+// The claims (FHIR) servers the helper may read from on a member's behalf. Override one with <KEY>_FHIR_URL.
+const FHIR_BASES = {
+  "aetna:sandbox": "https://vteapif1.aetna.com/fhirdemo/v2/patientaccess",
+  "aetna:production": "https://apif1.aetna.com/fhir/v2/patientaccess",
+  "medicare:sandbox": "https://sandbox.bluebutton.cms.gov/v2/fhir",
+  "medicare:production": "https://api.bluebutton.cms.gov/v2/fhir",
+};
 const GRANTS = new Set(["authorization_code", "refresh_token"]);
 const MAX = 4096; // longest code, verifier or refresh token accepted
+const MAX_TOKEN = 8192; // longest access token relayed
+const TOKEN_CHARS = /^[A-Za-z0-9\-._~+/]+=*$/;
+
+// The insurer address, only if it sits under that insurer's claims server (same https origin, same base path).
+function fhirTarget(env, key, raw) {
+  const p = key.replace(":", "_").toUpperCase();
+  let base, u;
+  try { base = new URL(env[p + "_FHIR_URL"] || FHIR_BASES[key]); u = new URL(String(raw || "")); } catch (e) { return null; }
+  const root = base.pathname.replace(/\/+$/, "");
+  if (u.protocol !== "https:" || u.origin !== base.origin || u.username || u.password) return null;
+  if (u.pathname !== root && !u.pathname.startsWith(root + "/")) return null;
+  if (/(^|\/)\.\.?(\/|$)/.test(u.pathname) || /%2e|%2f|%5c/i.test(u.pathname)) return null;
+  u.hash = "";
+  return u.toString();
+}
 
 function settingsFor(env, key) {
   const p = key.replace(":", "_").toUpperCase(); // aetna:sandbox -> AETNA_SANDBOX
@@ -53,7 +81,28 @@ export default {
     if (path === "/health" && request.method === "GET") {
       const ready = {};
       for (const key of Object.keys(TOKEN_URLS)) { const s = settingsFor(env, key); if (s) ready[key] = { client_id: s.id }; }
-      return reply(200, { ok: true, ready });
+      return reply(200, { ok: true, ready, relay: Object.keys(FHIR_BASES) });
+    }
+
+    // Read one claims page on the member's behalf, with the member's own token (never HerePup's secret).
+    if (path === "/fhir" && request.method === "POST") {
+      if (!allowed) return reply(403, { error: "origin_not_allowed", error_description: "This helper only answers HerePup's own pages." });
+      let b;
+      try { b = await request.json(); } catch (e) { return reply(400, { error: "invalid_request", error_description: "Send JSON." }); }
+      const key = `${b.carrier}:${b.env}`;
+      if (!FHIR_BASES[key]) return reply(400, { error: "invalid_request", error_description: "Unknown insurer or environment." });
+      if (typeof b.token !== "string" || !b.token || b.token.length > MAX_TOKEN || !TOKEN_CHARS.test(b.token))
+        return reply(400, { error: "invalid_request", error_description: "Missing or invalid access token." });
+      const target = fhirTarget(env, key, b.url);
+      if (!target) return reply(400, { error: "invalid_request", error_description: "That address isn't on this insurer's claims server." });
+      let r;
+      try {
+        r = await fetch(target, { method: "GET", redirect: "manual",
+          headers: { Authorization: "Bearer " + b.token, Accept: "application/fhir+json, application/json" } });
+      } catch (e) { return reply(502, { error: "insurer_unreachable", error_description: "The insurer's claims server didn't answer." }); }
+      if (r.status >= 300 && r.status < 400) return reply(502, { error: "redirect_refused", error_description: `The insurer's claims server tried to redirect (${r.status}).` });
+      return new Response(r.body, { status: r.status, headers: { ...cors, "Content-Type": r.headers.get("Content-Type") || "application/fhir+json",
+        "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff" } });
     }
 
     if (path !== "/token" || request.method !== "POST") return reply(404, { error: "not_found" });

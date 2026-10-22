@@ -1,10 +1,12 @@
 // Direct insurer connections from the browser (in testing: turn on with /app/?connect=test, off with ?connect=off).
 // SMART on FHIR authorization code with PKCE. The insurer returns the sign-in to /app/callback/ on this same site,
 // which leaves the code for this tab, and the claims then come straight from the insurer to this browser.
-// Claims never pass through HerePup. One step can: insurers like Aetna require a client secret to trade the
-// sign-in code for an access token, and block browsers from that step (CORS). HerePup's sign-in helper (a small
-// Cloudflare Worker, source in _tools/signin-helper/) holds the secret, does that one exchange, keeps nothing,
-// and hands the answer back. check() tests what this browser can reach before anyone signs in.
+// Two steps can need HerePup's sign-in helper (a small Cloudflare Worker, source in _tools/signin-helper/), which
+// keeps and logs nothing: insurers like Aetna require a client secret to trade the sign-in code for an access token,
+// and block browsers from that step (CORS), so the helper holds the secret and does that one exchange. And some
+// insurers (Aetna production) also block browsers from reading the claims, so when a direct read is blocked the
+// helper makes the same read-only request with the member's own token and passes the reply straight back.
+// check() tests what this browser can reach before anyone signs in.
 "use strict";
 
 // HerePup's sign-in helper. Empty = the browser does the token step itself (works only where the insurer allows it).
@@ -72,7 +74,7 @@ export function testMode() {
 
 // The member's go-ahead before connecting (CARIN Code: clear, affirmative permission). Bump the date when the
 // privacy policy's connection terms change, so people confirm again.
-export const CONSENT_VERSION = "2026-10-20";
+export const CONSENT_VERSION = "2026-10-22";
 
 export const callbackUrl = () => location.origin + "/app/callback/";
 export function settings(cid) { return read(localStorage, SKEY, {})[cid] || {}; }
@@ -147,6 +149,32 @@ async function send(url, opts, what) {
   }
 }
 
+// Claims reads: straight from the insurer when this browser is allowed to; otherwise through the helper's relay.
+const relayed = {}; // cid:env -> true once a direct read was blocked on this page
+async function helperRelays(cid, env, cfg) {
+  const helper = helperUrl(cfg);
+  if (!helper) return false;
+  try { return ((await helperInfo(helper)).relay || []).includes(`${cid}:${env}`); } catch (e) { return false; }
+}
+async function fhirGet(cid, ep, cfg, url, token, what) {
+  const key = `${cid}:${ep.env}`, c = CARRIERS[cid];
+  if (!relayed[key]) {
+    try {
+      return await fetch(url, { headers: { Authorization: "Bearer " + token, Accept: "application/fhir+json, application/json" },
+        credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer" });
+    } catch (e) {
+      if (!(await helperRelays(cid, ep.env, cfg))) {
+        const err = new Error(`${c.name}'s claims server doesn't accept connections from web pages, and HerePup's sign-in helper `
+          + `can't pass them through yet. Download your claims from ${c.name} and drop the files in instead.`);
+        err.blocked = true; throw err;
+      }
+      relayed[key] = true;
+    }
+  }
+  return send(helperUrl(cfg) + "/fhir", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ carrier: cid, env: ep.env, url, token }) }, "HerePup's sign-in helper");
+}
+
 async function tokenRequest(cid, c, cfg, ep, form) {
   const helper = helperUrl(cfg);
   if (helper) { // the helper adds the secret and talks to the insurer; its reply is the insurer's own
@@ -193,14 +221,13 @@ export async function finish(ret) {
 export async function pull(cid, onProgress = () => {}) {
   const c = CARRIERS[cid], tok = connection(cid);
   if (!tok) throw new Error(`Connect to ${c.name} first. A sign-in lasts about an hour.`);
-  const ep = endpoints(cid, { ...settings(cid), env: tok.env }), base = ep.fhir.replace(/\/+$/, "");
-  const headers = { Authorization: "Bearer " + tok.access_token, Accept: "application/fhir+json, application/json" };
+  const cfg = settings(cid), ep = endpoints(cid, { ...cfg, env: tok.env }), base = ep.fhir.replace(/\/+$/, "");
   const what = `${c.name}'s claims server`, notes = [];
   let count = 0;
   async function getAll(url, maxPages = 40) {
     const out = [];
     while (url && maxPages-- > 0) {
-      const r = await send(url, { headers }, what);
+      const r = await fhirGet(cid, ep, cfg, url, tok.access_token, what);
       if (r.status === 401) { disconnect(cid); throw new Error(`The ${c.name} sign-in expired or was refused. Press Connect again.`); }
       if (!r.ok) { const e = new Error(`${c.name} returned ${r.status} for ${new URL(url).pathname.split("/").filter(Boolean).slice(-1)[0]}.`); e.status = r.status; throw e; }
       const b = await r.json();
@@ -235,6 +262,7 @@ export async function pull(cid, onProgress = () => {}) {
 // What can this browser reach? Harmless requests shaped like the real ones (a made-up client, code and token), so
 // the browser runs the same permission checks (CORS) it will need later. fhir: the claims server. token: the
 // insurer's sign-in server, or with the helper, whether the helper answers and is set up for this insurer.
+// relay: whether the helper can pass claims through when the claims server blocks this browser.
 export async function check(cid) {
   const cfg = settings(cid), ep = endpoints(cid, cfg), helper = helperUrl(cfg);
   const base = { credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer" };
@@ -245,5 +273,6 @@ export async function check(cid) {
     : ok(fetch(ep.token, { ...base, method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: "Basic " + btoa("herepup-check:check") },
       body: "grant_type=authorization_code&code=check&redirect_uri=" + encodeURIComponent(callbackUrl()) }));
-  return { token: await token, fhir: await fhir, helper: !!helper };
+  const relay = helper ? helperRelays(cid, ep.env, cfg) : Promise.resolve(false);
+  return { token: await token, fhir: await fhir, relay: await relay, helper: !!helper };
 }
