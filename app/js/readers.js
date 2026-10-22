@@ -914,10 +914,15 @@ export function mapFhir(resources) {
     const contained = {}; for (const c of eob.contained || []) if (c.id) contained["#" + c.id] = c;
     const type = claimType(eob);
     const member = nameOf(resolve(eob.patient, contained)) || (eob.patient || {}).display || "";
+    // Exports that carry only the claims (no Patient or Practitioner records) leave names as bare references.
+    const memberRef = member ? "" : ((eob.patient || {}).reference || "");
     const nameRef = (ref) => known(nameOf(resolve(ref, contained))) || known((ref || {}).display);
     let provider = nameRef(eob.provider);
     for (const ct of eob.careTeam || []) if (!provider) provider = nameRef(ct.provider);
     if (!provider) provider = nameRef(eob.facility) || nameRef((eob.payee || {}).party); // hospital claims often name only the facility
+    const placeAddr = (eob.item || []).map((it) => it.locationAddress).find((a) => a && (a.city || a.state)) || null;
+    const providerRef = provider ? "" : ((eob.provider || {}).reference || ((eob.careTeam || [])[0] || {}).provider?.reference || "");
+    if (!provider && placeAddr) provider = `Provider in ${[placeAddr.city, placeAddr.state].filter(Boolean).join(", ")}`;
     const sub = (codes(eob.subType)[0] || "").toLowerCase() || (codes(eob.type).some((x) => /^inpatient$/i.test(x)) ? "inpatient" : "");
     const tax = (eob.careTeam || []).flatMap((ct) => codes(ct.qualification));
     const claimDate = ((eob.billablePeriod || {}).start || eob.created || "").slice(0, 10);
@@ -925,16 +930,20 @@ export function mapFhir(resources) {
     const brand = (eob.supportingInfo || []).filter((s) => codes(s.category).map((c) => c.toLowerCase()).includes("brandgenericindicator")).map((s) => (codes(s.code)[0] || "").toLowerCase());
     // In- or out-of-network, when the insurer says (CARIN: supportingInfo "benefitpaymentstatus", or adjudication categories).
     const netCodes = [...(eob.supportingInfo || []).filter((s) => codes(s.category).some((c) => /benefitpaymentstatus/i.test(c))).flatMap((s) => codes(s.code)),
+      ...(eob.adjudication || []).filter((a) => codes(a.category).some((c) => /benefitpaymentstatus/i.test(c))).flatMap((a) => codes(a.reason)),
       ...(eob.adjudication || []).flatMap((a) => codes(a.category)), ...items.flatMap((it) => (it.adjudication || []).flatMap((a) => codes(a.category)))].map((c) => c.toLowerCase());
     const network = netCodes.some((c) => /^(outofnetwork|out-of-network|oon)$/.test(c)) ? "out" : netCodes.some((c) => /^(innetwork|in-network|inn)$/.test(c)) ? "in" : "";
     // The provider's state (from the billing provider or facility address), for state-specific bill rules.
     const stateOf = (ref) => { const r = resolve(ref, contained); const a = r && (r.address || [])[0]; return a && a.state ? String(a.state).toUpperCase().slice(0, 2) : ""; };
-    const providerState = stateOf(eob.provider) || stateOf(eob.facility) || stateOf((eob.payee || {}).party);
+    const providerState = stateOf(eob.provider) || stateOf(eob.facility) || stateOf((eob.payee || {}).party) || (placeAddr && placeAddr.state ? String(placeAddr.state).toUpperCase().slice(0, 2) : "");
     // One row per line item when every line carries its own adjudicated amounts; otherwise one row for the claim from
     // its totals (some insurers put only partial amounts on the lines of facility claims).
     const lineAdj = items.map((it) => sumCats(it.adjudication)), totals = sumCats(eob.total);
     const useItems = items.length > 0 && (lineAdj.every((a) => COMPLETE.some((k) => k in a)) || (!Object.keys(totals).length && items.some((it) => (it.adjudication || []).length)));
-    (useItems ? items.map((it, k) => ({ it, a: lineAdj[k] })) : [{ it: null, a: totals }]).forEach(({ it, a }, k) => {
+    const nonZero = (a) => Object.values(a).some((v) => Math.abs(Number(v) || 0) > 0.004);
+    const lines = useItems ? items.map((it, k) => ({ it, a: lineAdj[k] })) : [{ it: null, a: totals }];
+    const kept = useItems && lines.some((x) => nonZero(x.a)) ? lines.filter((x) => nonZero(x.a)) : lines; // $0 lines are bundled or informational
+    kept.forEach(({ it, a }, k) => {
       const all = it ? [it] : items;
       const date = ((it && (it.servicedDate || (it.servicedPeriod || {}).start)) || claimDate).slice(0, 10);
       const pos = uniq(all.flatMap((x) => codes(x.locationCodeableConcept))), rev = uniq(all.flatMap((x) => codes(x.revenue))), cpt = uniq(all.flatMap((x) => codes(x.productOrService)));
@@ -947,15 +956,25 @@ export function mapFhir(resources) {
       if (allowed != null && paid != null && allowed + 0.01 < paid) { allowed = owe != null ? r2(paid + owe) : null; odd = true; }
       if (allowed == null && paid != null && owe != null) allowed = r2(paid + owe);
       if (allowed != null && paid != null && owe != null && Math.abs(allowed - paid - owe) > Math.max(1, allowed * 0.02)) odd = true;
+      const words = (first || desc || "").toLowerCase();
+      const fromWords = !cpt.length && !pos.length && !rev.length
+        ? (/routine|preventive|wellness|annual (exam|physical)|screening/.test(words) ? ["preventive", "Insurer's description (routine or preventive care)"]
+          : /office visit/.test(words) ? ["office", "Insurer's description (office visit)"]
+          : /emergency/.test(words) ? ["er", "Insurer's description (emergency)"]
+          : /urgent/.test(words) ? ["urgent", "Insurer's description (urgent care)"] : null) : null;
       const typed = inpatient ? ["medical", "Hospital inpatient stay (claim type or place of service 21)"]
         : classifyItem(type, pos, rev, cpt, tax)
-          || (type === "institutional" && (pos.includes("19") || pos.includes("22")) ? ["medical", "Hospital outpatient services (place of service)"] : null);
+          || (type === "institutional" && (pos.includes("19") || pos.includes("22")) ? ["medical", "Hospital outpatient services (place of service)"] : null)
+          || fromWords;
       const row = { id: `fhir-${eob.id || newId()}-${k + 1}`, date, member, provider, service: desc, category: typed ? typed[0] : "medical",
         billed: a.submitted ?? null, allowed, plan_paid: paid, member_resp: owe, copay: a.copay ?? null, deductible: a.deductible ?? null, coinsurance: a.coinsurance ?? null,
         needs_review: allowed == null || odd, place: pos.includes("11") ? "office" : (pos[0] && ["19", "21", "22", "23"].includes(pos[0]) ? "facility" : ""), claim: eob.id || "" };
       if (network) row.network = network;
+      if (memberRef) row.member_ref = memberRef;
+      if (providerRef) row.provider_ref = providerRef;
       if (providerState) row.provider_state = providerState;
       if (typed) Object.assign(row, { type_source: typed[1], type_confidence: "high", type_locked: true });
+      if (fromWords && typed === fromWords) Object.assign(row, { type_confidence: "medium", check: true }); // a guess from words: ask the member to confirm
       if (cpt[0] && row.category !== "rx") row.proc = cpt[0];
       if (row.category === "rx") Object.assign(row, { rx_tier: brand.join("").includes("generic") || !brand.length ? 1 : 2, type_source: "Pharmacy claim" + (brand.length ? ` (${brand[0]})` : ""),
         rx_drug: desc, pharmacy: provider, rx_qty: all[0] && all[0].quantity && all[0].quantity.value != null ? Number(all[0].quantity.value) : null });
@@ -972,7 +991,21 @@ export function mapFhir(resources) {
     }
   }
   if (observed) observed.as_of = rows.map((r) => r.date).filter(Boolean).sort().pop() || null;
-  return { rows, skipped, coverage, observed };
+  // Providers known only by a reference: keep different providers apart even when they share a city.
+  const byRef = new Map(), labelRefs = new Map();
+  for (const r of rows) if (r.provider_ref && !byRef.has(r.provider_ref)) byRef.set(r.provider_ref, r.provider || "");
+  let k = 0;
+  for (const [ref, label] of byRef) {
+    let l = label || `Provider ${++k} (name not in file)`;
+    const n = (labelRefs.get(l) || 0) + 1; labelRefs.set(l, n);
+    if (n > 1) l += ` (${n})`;
+    byRef.set(ref, l);
+  }
+  for (const r of rows) if (r.provider_ref) r.provider = byRef.get(r.provider_ref);
+  const unnamed = [...new Set(rows.map((r) => r.member_ref).filter(Boolean))];
+  const notes = [];
+  if (unnamed.length) notes.push(`This file has the claims but not the names of the people or providers on them. Choose who ${unnamed.length === 1 ? "they belong" : "each person's claims belong"} to below; providers are labeled by where the care was billed.`);
+  return { rows, skipped, coverage, observed, notes, unnamed_members: unnamed };
 }
 export function parseFhirText(text) {
   const t = text.replace(/^\uFEFF/, "").trim();

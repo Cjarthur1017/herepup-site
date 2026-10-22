@@ -314,6 +314,7 @@ function reviewTable() {
   return `<div class="card review"><h2>Review what we read (${r.rows.length} rows)</h2>
     ${(r.notes || []).map((n) => `<p class="muted">${esc(n)}</p>`).join("")}
     ${r.unreadable_pages ? `<div class="warn">${r.unreadable_pages} page(s) are scanned images and were not read.</div>` : ""}
+    ${unnamedPicker(r)}
     ${r.new_people && r.new_people.length ? `<div class="warn"><b>These people are not in your household yet:</b> ${r.new_people.map((n, k) => `<span style="margin-right:12px">${esc(n)} <select id="np-${k}" aria-label="Role for ${esc(n)}"><option value="adult">Adult</option><option value="child">Child</option></select></span>`).join("")}
       <button class="btn small" data-act="add-people">Add them to my household</button></div>` : ""}
     ${(r.coverage || []).length || r.skipped ? `<p class="muted">${(r.coverage || []).map((c) => `Coverage: ${esc(c.plan || "plan")} (${esc(c.payor)}), from ${esc(c.start)}${c.end ? " to " + esc(c.end) : ""}.`).join(" ")}${r.skipped ? ` ${r.skipped} cancelled claim(s) left out.` : ""}</p>` : ""}
@@ -323,6 +324,22 @@ function reviewTable() {
     ${r.kind === "eob" && r.generic_reader ? `<div class="row"><label>Column order in your EOB's amounts<input id="order" style="min-width:380px" value="${esc(S.order || "billed,allowed,plan_paid,member_resp")}"></label><button class="btn small" data-act="reparse">Re-read with this order</button></div><p class="muted">Use the names billed, discount, allowed, plan_paid, member_resp, and any other word for columns to ignore, in the order they appear on the EOB.</p>` : ""}
     <div class="scroll"><table class="edit"><thead><tr><th>Skip</th><th>Date</th><th>Person</th><th>Provider</th><th>Type</th><th>Rx tier</th><th>Billed</th><th>Allowed</th><th>Plan paid</th><th>You owe</th></tr></thead><tbody>${rows}</tbody></table></div>
     ${landing}<div class="row" style="margin-top:12px"><button class="btn" data-act="rerun">Re-run the numbers</button>${r.rows.some((x) => x.check && !x.confirmed) ? `<button class="btn" data-act="confirm-all">Confirm all flagged types</button>` : ""}<button class="btn primary" data-act="commit">Save these claims</button><button class="btn" data-act="discard">Discard</button></div></div>`;
+}
+
+// Claims files that carry only references to people (no names): ask once per person whose claims they are.
+function unnamedPicker(r) {
+  const refs = [...new Set(r.rows.filter((x) => x.member_ref).map((x) => x.member_ref))];
+  if (!refs.length) return "";
+  const opts = (sel) => `<option value="">Choose...</option>${S.members.map((m) => `<option value="${m.id}" ${m.id === sel ? "selected" : ""}>${esc(m.name)}</option>`).join("")}`;
+  const items = refs.map((ref, k) => {
+    const mine = r.rows.filter((x) => x.member_ref === ref), dates = mine.map((x) => x.date).filter(Boolean).sort();
+    const cur = mine.every((x) => x.member_id && x.member_id === mine[0].member_id) ? mine[0].member_id : "";
+    return `<label>${refs.length > 1 ? `Person ${k + 1}: ` : ""}${mine.length} claim${mine.length === 1 ? "" : "s"}${dates.length ? `, ${esc(dates[0])} to ${esc(dates[dates.length - 1])}` : ""}
+      <select data-mref="${esc(ref)}">${opts(cur)}</select></label>`;
+  }).join("");
+  const done = r.rows.filter((x) => x.member_ref).every((x) => x.member_id);
+  return `<div class="${done ? "card" : "warn"}"><b>Whose claims are these?</b> This file doesn't include names, so tell HerePup who ${refs.length === 1 ? "they belong" : "each set belongs"} to.
+    <div class="row" style="margin-top:8px">${items}</div>${S.members.length ? "" : `<p>Add the people on step 1 first.</p>`}</div>`;
 }
 
 function stepClaims() {
@@ -969,6 +986,7 @@ document.addEventListener("change", async (ev) => {
     }
     if (t.dataset.act === "claims-file" && t.files[0]) { S.err = ""; await uploadClaims(t.files[0], t.dataset.kind); return; }
     if (t.dataset.act === "current-plan") { S.currentPlan = t.value; return; }
+    if (t.dataset.mref && S.review) { for (const row of S.review.rows) if (row.member_ref === t.dataset.mref) row.member_id = t.value; S.preview = null; render(); return; }
     if (t.dataset.act === "bill-pdf" && t.files[0]) {
       const key = `${t.dataset.tool}:${t.dataset.which === "bill" ? "billed" : "estimate"}`;
       try { const doc = await pdfPages(t.files[0]); const found = B.amountsIn(doc.pages.join("\n")); S.billAmounts = { ...S.billAmounts, [key]: found };
