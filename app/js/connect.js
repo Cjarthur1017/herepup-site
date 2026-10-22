@@ -212,9 +212,27 @@ export async function finish(ret) {
   const cfg = settings(cid), ep = endpoints(cid, { ...cfg, env: pend.env });
   const tok = await tokenRequest(cid, c, cfg, ep, { grant_type: "authorization_code", code: ret.code, redirect_uri: pend.redirect, code_verifier: pend.verifier });
   if (!tok.access_token) throw new Error(`${c.name} didn't return an access token.`);
-  const rec = { access_token: tok.access_token, patient: tok.patient || "", env: pend.env, expires_at: Date.now() + 1000 * Number(tok.expires_in || 3600) };
+  const rec = { access_token: tok.access_token, patient: tok.patient || "", env: pend.env, signed_at: Date.now(), expires_at: Date.now() + 1000 * Number(tok.expires_in || 3600) };
   const all = read(sessionStorage, TKEY, {}); all[cid] = rec; write(sessionStorage, TKEY, all);
   return { cid, ...rec };
+}
+
+// Which kind of record an address asks for (Patient, Coverage, ExplanationOfBenefit...), for messages.
+function resourceName(url) {
+  try { return new URL(url).pathname.split("/").filter(Boolean).find((p) => /^[A-Z][A-Za-z]+$/.test(p)) || "claims"; } catch (e) { return "claims"; }
+}
+// The insurer's own words for a refusal: a FHIR OperationOutcome, an OAuth error, an API-gateway fault, or short text.
+async function refusalReason(r) {
+  const www = r.headers.get("WWW-Authenticate") || "";
+  let t = ""; try { t = (await r.text()).trim(); } catch (e) { /* no body */ }
+  let why = "";
+  try {
+    const j = JSON.parse(t);
+    why = (j.issue || []).map((i) => i.diagnostics || (i.details || {}).text || i.code).filter(Boolean).join("; ")
+      || j.error_description || (typeof j.error === "string" ? j.error : "") || ((j.fault || {}).faultstring) || j.message || j.moreInformation || j.httpMessage || "";
+  } catch (e) { if (t && !/^</.test(t)) why = t; }
+  if (!why && www) why = www;
+  return String(why).replace(/\s+/g, " ").slice(0, 200);
 }
 
 // Patient, Coverage and every page of ExplanationOfBenefit, plus referenced providers that weren't included.
@@ -228,8 +246,16 @@ export async function pull(cid, onProgress = () => {}) {
     const out = [];
     while (url && maxPages-- > 0) {
       const r = await fhirGet(cid, ep, cfg, url, tok.access_token, what);
-      if (r.status === 401) { disconnect(cid); throw new Error(`The ${c.name} sign-in expired or was refused. Press Connect again.`); }
-      if (!r.ok) { const e = new Error(`${c.name} returned ${r.status} for ${new URL(url).pathname.split("/").filter(Boolean).slice(-1)[0]}.`); e.status = r.status; throw e; }
+      if (!r.ok) {
+        const part = resourceName(url), why = await refusalReason(r);
+        if (r.status === 401) {
+          disconnect(cid);
+          const mins = tok.signed_at ? Math.round((Date.now() - tok.signed_at) / 60000) : null;
+          throw new Error(`${c.name} refused the request for ${part} (401${why ? `: ${why}` : ""}). `
+            + `${mins != null ? `You signed in ${mins} minute${mins === 1 ? "" : "s"} ago. ` : ""}Press Connect, sign in again, and the claims are pulled right away.`);
+        }
+        const e = new Error(`${c.name} returned ${r.status} for ${part}${why ? `: ${why}` : "."}`); e.status = r.status; throw e;
+      }
       const b = await r.json();
       if (b.resourceType === "Bundle") {
         const got = (b.entry || []).map((x) => x.resource).filter(Boolean);
