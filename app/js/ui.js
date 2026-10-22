@@ -355,7 +355,7 @@ function insurerCard() {
   const ins = INSURERS.find((x) => x.id === S.insurer);
   const opts = `<option value="">Choose your insurer...</option>` + INSURERS.map((x) => `<option value="${x.id}" ${x.id === S.insurer ? "selected" : ""}>${esc(x.name)}</option>`).join("");
   const body = !ins ? `<p class="muted">Pick your insurer to see where to download your claims and whether a direct connection is possible.</p>`
-    : `<ol class="muted steps-list"><li>Sign in to ${ins.member ? `<a href="${esc(ins.member)}" target="_blank" rel="noopener">your ${esc(ins.name)} member site</a>` : "your insurer's member website"} or app.</li>
+    : `<ol class="muted steps-list"><li>Sign in to ${ins.member ? `<a href="${esc(ins.member)}" target="_blank" rel="noopener">your ${esc(ins.name)} member site</a>` : "your insurer's member website"} or app.${ins.register ? ` No account yet? <a href="${esc(ins.register)}" target="_blank" rel="noopener">Create one</a> with the member ID on your insurance card.` : ""}</li>
         <li>Open <b>Claims</b>. Look for <b>Download</b> or <b>Export</b> to get a spreadsheet of all claims, or open each claim's explanation of benefits (EOB) as a PDF.</li>
         <li>Drop the files here.</li></ol>
       ${ins.id !== "other" ? `<p class="muted"><b>Direct connection (in testing):</b> ${esc(ins.name)} publishes a Patient Access API. ${esc(ins.covers)} HerePup status: ${esc(ins.herepup)}. <a href="/insurers/">About insurer connections</a></p>` : ""}
@@ -394,9 +394,11 @@ function connectPanel(cid) {
     ? `<p class="cx-on">Connected to ${esc(c.name)} ${esc(tok.env)}${tok.patient ? ` (member record ${esc(tok.patient)})` : ""} for about ${mins} more minute${mins === 1 ? "" : "s"}.</p>
        ${consent}<div class="row"><button class="btn primary" data-act="cx-pull" data-cid="${cid}">Pull claims again</button><button class="btn" data-act="cx-connect" data-cid="${cid}">Connect another family member</button><button class="btn small" data-act="cx-disconnect" data-cid="${cid}">Disconnect</button></div>`
     : `${consent}<div class="row"><button class="btn primary" data-act="cx-connect" data-cid="${cid}">Connect to ${esc(c.name)}</button></div>`;
+  const site = INSURERS.find((x) => x.id === cid) || {};
   return `<div class="cx" id="cx-panel"><h3>Connect to ${esc(c.name)} <span class="pill">Testing</span></h3>
     <p class="muted">Sign in at ${esc(c.name)} and your claims come straight into this browser. ${helper
       ? "Only the one-time sign-in step goes through HerePup's sign-in helper, which keeps nothing." : "Nothing passes through HerePup."}</p>
+    ${site.register ? `<p class="muted">You'll sign in with your ${esc(c.name)} member account (the one for <a href="${esc(site.member)}" target="_blank" rel="noopener">${esc(new URL(site.member).host)}</a>). No account yet? <a href="${esc(site.register)}" target="_blank" rel="noopener">Create one</a> with the member ID on your insurance card, then come back and connect.</p>` : ""}
     ${Object.keys(c.envs).length > 1 ? `<label>Which data<select data-cx="env" data-cid="${cid}">${envs}</select></label>` : `<p class="muted">${esc(c.envs[ep.env].label)}</p>`}
     ${c.askMember ? `<label style="margin-top:8px">Whose ${esc(c.name)} is this?<select data-cx="member_id" data-cid="${cid}"><option value="">Choose a person...</option>${S.members.map((m) => `<option value="${esc(m.id)}" ${cfg.member_id === m.id ? "selected" : ""}>${esc(m.name)}</option>`).join("")}</select></label>` : ""}
     ${helper ? `<details><summary><b>App settings</b></summary>

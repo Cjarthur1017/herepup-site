@@ -1,8 +1,9 @@
 // Insurers with a published Patient Access API (CMS interoperability rule), as stated in each insurer's own developer materials.
 // "covers" repeats what the insurer says; employer (commercial) plans are often not included.
 export const INSURERS = [
-  { id: "aetna", name: "Aetna", member: "https://www.aetna.com", dev: "https://developerportal.aetna.com/",
-    covers: "Medicare, Medicaid and some fully insured commercial plans (Aetna names California and Tennessee).", herepup: "Testing with Aetna's sandbox; production access next" },
+  // member: the sign-in page itself (aetna.com is a marketing site; members sign in at health.aetna.com).
+  { id: "aetna", name: "Aetna", member: "https://health.aetna.com/login", register: "https://health.aetna.com/register", dev: "https://developerportal.aetna.com/",
+    covers: "Medicare, Medicaid and some fully insured commercial plans (Aetna names California and Tennessee).", herepup: "Production access approved; testing with real members" },
   { id: "uhc", name: "UnitedHealthcare", member: "https://www.myuhc.com", dev: "https://flex.optum.com/portal/homepage",
     covers: "UnitedHealthcare, Sierra Health and Life, Rocky Mountain Health Plans and Peoples Health members. Plan types aren't stated.", herepup: "Not registered yet" },
   { id: "cigna", name: "Cigna", member: "https://www.mycigna.com", dev: "https://developer.cigna.com/",
