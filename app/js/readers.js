@@ -317,6 +317,64 @@ export function parseCignaEob(pages) {
   return { rows, observed: hasObs ? observed : null, unparsed_dated_lines: unparsed.slice(0, 20), looks_like_cigna: seen };
 }
 
+// ------------------------------------------------------------------ claims printed as labeled cards
+// Claim-viewer pages saved as PDF (for example MyFlexpa's Explanation of Benefits page) show each claim as a card of
+// "Label" / value pairs with a Totals block ("Eligible Amount $183.98 USD", "Member liability $0.00 USD"...).
+const CARD_START = /^(professional|institutional|pharmacy|oral|vision|medical|dental)\b[^$]*?(\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4})$/i;
+const TOTALS = [["billed", /^(submitted|billed|total charges?)( amount)?$/i], ["allowed", /^(eligible|allowed)( amount)?$/i],
+  ["benefit", /^(benefit|plan paid)( amount)?$/i], ["paid_by_payer", /^paid by payer$/i], ["paid_to_provider", /^paid to provider$/i],
+  ["member_resp", /^(member liability|patient responsibility|you owe)$/i], ["owed_by_patient", /^owed by patient$/i],
+  ["coinsurance", /^co-?insurance$/i], ["copay", /^co-?pay(ment)?$/i], ["deductible", /^deductible$/i], ["not_covered", /^non-?covered|not covered$/i],
+  ["discount", /^discount$/i], ["drug_cost", /^drug cost$/i]];
+export function parseLabeledEob(pages) {
+  const lines = pages.join("\n").split("\n").map((l) => l.trim()).filter((l) => l
+    && !/^\d{1,2}\/\d{1,2}\/\d{2,4},? \d{1,2}:\d{2}\s*[AP]M\b/i.test(l) && !/^https?:\/\/\S+(\s+\d+\/\d+)?$/i.test(l));
+  const cards = []; let cur = null;
+  for (const l of lines) {
+    if (CARD_START.test(l) && !/\$/.test(l)) { cur = { head: l, lines: [] }; cards.push(cur); continue; }
+    if (cur) cur.lines.push(l);
+  }
+  const rows = [];
+  cards.forEach((c, ci) => {
+    const L = c.lines, after = (re, k = 1) => { const i = L.findIndex((x) => re.test(x)); return i >= 0 ? L[i + k] || "" : ""; };
+    const tot = {};
+    for (const l of L) {
+      const m = l.match(/^(.+?)\s+(-?)\$\s?([\d,]+\.\d{2})(?:\s*USD)?$/i);
+      if (!m) continue;
+      const hit = TOTALS.find(([, re]) => re.test(m[1].trim()));
+      if (hit && tot[hit[0]] == null) tot[hit[0]] = (m[2] ? -1 : 1) * Number(m[3].replace(/,/g, ""));
+    }
+    if (tot.allowed == null && tot.billed == null) return;
+    // Provider: the care team's named provider or organization, else the left half of the "Provider Insurer" line.
+    let provider = "";
+    const ct = L.findIndex((x) => /^care team$/i.test(x));
+    if (ct >= 0) for (let k = ct + 1; k < Math.min(ct + 6, L.length); k++) { if (/^(provider|organization|practitioner)$/i.test(L[k])) continue; provider = L[k]; break; }
+    if (!provider || /^(npi|role|not provided)/i.test(provider)) provider = after(/^(provider|organization)\s+insurer$/i).replace(/\s+(cigna|aetna|anthem|united|humana|blue|kaiser|elevance|wellcare|ambetter)\b.*$/i, "");
+    const dates = (after(/^billable start/i).match(/\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4}/g) || []);
+    const date = normDate(dates[0] || (c.head.match(CARD_START) || [])[2] || "");
+    const member = after(/^patient$/i);
+    const descs = L.map((x, i) => (/^description$/i.test(x) ? L[i + 1] : null)).filter((x) => x && !/^see details$/i.test(x));
+    const codes = L.map((x, i) => (/^code$/i.test(x) && /^[A-Z0-9]{4,6}$/.test(L[i + 1] || "") ? L[i + 1] : null)).filter(Boolean);
+    const service = [...new Set(descs)].slice(0, 2).map((d) => d.toLowerCase().replace(/\b\w/g, (x) => x.toUpperCase())).join(", ");
+    const type = c.head.split(/\s/)[0].toLowerCase();
+    // Viewers often list every adjudication category, most of them $0; take the first one that carries the amount.
+    const firstOf = (...ks) => { const v = ks.map((k) => tot[k]).filter((x) => x != null); return v.find((x) => x !== 0) ?? (v.length ? 0 : null); };
+    const paid = firstOf("benefit", "paid_by_payer", "paid_to_provider");
+    const owe = firstOf("member_resp", "owed_by_patient");
+    let allowed = tot.allowed ?? null;
+    if (allowed == null && paid != null && owe != null) allowed = r2(paid + owe);
+    const id = (L[L.findIndex((x) => /^unique claim id$/i.test(x)) + 2] || "").replace(/\W/g, "") || `card${ci + 1}`;
+    rows.push({ id: `card-${id}`, date, member, provider, payee: "", service: service || (type[0].toUpperCase() + type.slice(1)),
+      category: type === "pharmacy" ? "rx" : eobCategory(service), billed: tot.billed ?? null, allowed, plan_paid: paid, member_resp: owe,
+      copay: tot.copay ?? null, deductible: tot.deductible ?? null, coinsurance: tot.coinsurance ?? null, not_covered: tot.not_covered ?? null,
+      place: "", claim: id, ...(codes[0] ? { proc: codes[0] } : {}),
+      needs_review: allowed == null || (paid != null && owe != null && Math.abs(allowed - paid - owe) > Math.max(1, allowed * 0.02)) });
+  });
+  const shown = (pages.join("\n").match(/showing\s+\d+\s+to\s+(\d+)\s+of\s+(\d+)/i) || []);
+  const notes = shown[2] && +shown[2] > +shown[1] ? [`This printout shows ${shown[1]} of ${shown[2]} claims. To bring in all of them, download the JSON file from the same page (Download JSON) and drop that here instead.`] : [];
+  return { rows, notes, cards: cards.length };
+}
+
 // generic EOB fallback: a dated line with 3+ amounts, with a column order the member can change
 const DEFAULT_ORDERS = { 4: ["billed", "allowed", "plan_paid", "member_resp"], 5: ["billed", "discount", "allowed", "plan_paid", "member_resp"],
   6: ["billed", "discount", "allowed", "plan_paid", "deductible_coins", "member_resp"] };
@@ -917,11 +975,22 @@ export function mapFhir(resources) {
   return { rows, skipped, coverage, observed };
 }
 export function parseFhirText(text) {
-  const data = JSON.parse(text.replace(/^﻿/, ""));
-  const resources = Array.isArray(data) ? data : data.resourceType === "Bundle" ? (data.entry || []).map((e) => e.resource || {}) : [data];
+  const t = text.replace(/^\uFEFF/, "").trim();
+  let data;
+  try { data = JSON.parse(t); }
+  catch (e) { data = t.split(/\r?\n/).filter((l) => l.trim()).map((l) => JSON.parse(l)); } // NDJSON (one resource per line)
+  // Any shape: a Bundle, an array, bundles of bundles, or an app's own wrapper ({ data: [...] }, { eob: {...} }...).
+  const resources = [], seen = new Set();
+  const walk = (x, depth = 0) => {
+    if (!x || typeof x !== "object" || depth > 8) return;
+    if (Array.isArray(x)) { x.forEach((y) => walk(y, depth + 1)); return; }
+    if (x.resourceType === "Bundle") { (x.entry || []).forEach((e) => walk(e.resource || e, depth + 1)); return; }
+    if (x.resourceType) { const k = `${x.resourceType}/${x.id || resources.length}`; if (!seen.has(k)) { seen.add(k); resources.push(x); } return; }
+    Object.values(x).forEach((v) => walk(v, depth + 1));
+  };
+  walk(data);
   return mapFhir(resources);
 }
-
 // ------------------------------------------------------------------ care type (no network lookups in the browser version)
 export function classifyRows(rows) {
   for (const r of rows) {

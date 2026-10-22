@@ -104,6 +104,7 @@ export async function upload(file, kind, order = null, onProgress = () => {}) {
     if (!(file.name || "").toLowerCase().endsWith(".pdf")) throw new Error(`${file.name}: explanations of benefits must be PDFs.`);
     const doc = await readDoc(file, onProgress);
     res = R.parseCignaEob(doc.pages);
+    if (!res.rows.length) { const lab = R.parseLabeledEob(doc.pages); if (lab.rows.length) res = { ...lab, labeled_cards: true }; }
     if (!res.rows.length) {
       if (R.detectPlans(doc.pages, file.name).plans.length) throw new Error(`${file.name} looks like a benefit guide, not a claim. Add it on the Plan documents step.`);
       res = R.parseEobText(doc.pages.join("\n"), order);
