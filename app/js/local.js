@@ -44,6 +44,12 @@ function cleanPlan(p) {
   p.rx_oop_ind = num(p.rx_oop_ind); p.rx_oop_fam = num(p.rx_oop_fam);
   p.flags = (p.flags || []).map(String);
   for (const k of ["premium_annual", "hsa_employer"]) { const d = p[k] && typeof p[k] === "object" ? p[k] : {}; p[k] = Object.fromEntries(TIERS.map((t) => [t, num(d[t])])); }
+  // Headcount pricing: { "1": premium for employee + 1, "2": ..., "3": employee + 3 or more }. Empty when not used.
+  const bc = p.premium_by_count && typeof p.premium_by_count === "object" ? p.premium_by_count : null;
+  if (bc && Object.keys(bc).some((k) => /^[1-9]$/.test(k))) p.premium_by_count = Object.fromEntries(Object.keys(bc).filter((k) => /^[1-9]$/.test(k)).sort().map((k) => [k, num(bc[k])]));
+  else delete p.premium_by_count;
+  p.embedded = !!p.embedded;
+  if (p.oop_embedded == null || p.oop_embedded === "") delete p.oop_embedded; else p.oop_embedded = !!p.oop_embedded;
 }
 
 function matchMember(name, members) {

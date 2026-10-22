@@ -19,6 +19,9 @@ export function simulate(plan, claims, members, multiplier = 1) {
   const oopInd = num(plan.oop_ind), oopFam = plan.oop_fam == null ? oopInd : num(plan.oop_fam);
   const coins = plan.coinsurance == null ? 0.2 : num(plan.coinsurance);
   const embedded = !!plan.embedded;
+  // The out-of-pocket maximum can work differently from the deductible (an aggregate deductible with each person's
+  // own out-of-pocket cap is common). Unset: same as the deductible.
+  const oopEmbedded = plan.oop_embedded == null ? embedded : !!plan.oop_embedded;
   const rxInDed = plan.rx_in_deductible == null ? true : !!plan.rx_in_deductible;
   const copays = plan.copays || {};
   const copayAfterDed = !!plan.copay_after_ded;
@@ -101,7 +104,7 @@ export function simulate(plan, claims, members, multiplier = 1) {
         if (memberCost > remRx) { memberCost = remRx; dedPart = Math.min(dedPart, memberCost); }
         dedUsed[m] += dedPart; famDed += dedPart; rxOopUsed[m] += memberCost; famRxOop += memberCost;
       } else {
-        const remOop = embedded ? Math.min(Math.max(oopInd - oopUsed[m], 0), Math.max(oopFam - famOop, 0)) : Math.max(oopFam - famOop, 0);
+        const remOop = oopEmbedded ? Math.min(Math.max(oopInd - oopUsed[m], 0), Math.max(oopFam - famOop, 0)) : Math.max(oopFam - famOop, 0);
         if (memberCost > remOop) { memberCost = remOop; dedPart = Math.min(dedPart, memberCost); }
         dedUsed[m] += dedPart; famDed += dedPart; oopUsed[m] += memberCost; famOop += memberCost;
       }
@@ -112,8 +115,19 @@ export function simulate(plan, claims, members, multiplier = 1) {
   return { member_cost: totalMember, plan_cost: totalPlan, lines, family_deductible_met: dedFam ? famDed >= dedFam - 0.005 : true, family_oop_used: famOop };
 }
 
-export function effectiveCost(plan, tier, memberCost, countHsa) {
-  const premium = num((plan.premium_annual || {})[tier]);
+// Premium for a coverage level, or, for plans priced by headcount ("Employee + 1 / + 2 / + 3 or more"), for the number
+// of people covered besides the employee (deps); the highest listed count covers that many or more.
+export function premiumFor(plan, tier, deps) {
+  const bc = plan.premium_by_count;
+  if (bc && deps != null && deps > 0) {
+    const ks = Object.keys(bc).map(Number).filter((k) => k > 0 && num(bc[k]) > 0).sort((a, b) => a - b);
+    if (ks.length) return num(bc[ks.filter((k) => k <= deps).pop() ?? ks[0]]);
+  }
+  return num((plan.premium_annual || {})[tier]);
+}
+
+export function effectiveCost(plan, tier, memberCost, countHsa, deps = null) {
+  const premium = premiumFor(plan, tier, deps);
   const raw = plan.hsa_employer;
   let hsa = typeof raw === "object" && raw ? num(raw[tier]) : num(raw);
   if (!plan.hsa_eligible) hsa = 0;
@@ -145,7 +159,7 @@ export function enumerateConfigs(household, employers) {
       const parts = used.map((e, k) => {
         const covered = ids.filter((i) => a[i] === e.id);
         const others = covered.filter((i) => i !== e.subscriber).map((i) => role[i]);
-        return { employer: e.id, employer_name: e.name, plan_index: choice[k], plan: e.plans[choice[k]], covered, tier: tierFor(others) };
+        return { employer: e.id, employer_name: e.name, plan_index: choice[k], plan: e.plans[choice[k]], covered, tier: tierFor(others), deps: others.length };
       });
       configs.push({ assignment: a, parts });
     }
@@ -173,9 +187,9 @@ export function analyze(household, employers, claims, multiplier = 1, countHsa =
     let total = 0, premium = 0, hsa = 0, mcost = 0;
     const detail = [];
     for (const p of cfg.parts) {
-      const eff = effectiveCost(p.plan, p.tier, memberCostOf(p.plan, claims, p.covered, multiplier), countHsa);
+      const eff = effectiveCost(p.plan, p.tier, memberCostOf(p.plan, claims, p.covered, multiplier), countHsa, p.deps);
       total += eff.total; premium += eff.premium; hsa += eff.hsa_offset; mcost += eff.member_cost;
-      detail.push({ employer: p.employer_name, plan: p.plan.name || "plan", tier: p.tier, covered: p.covered,
+      detail.push({ employer: p.employer_name, plan: p.plan.name || "plan", tier: p.tier, deps: p.deps, by_count: !!p.plan.premium_by_count, covered: p.covered,
         premium: r2(eff.premium), member_cost: r2(eff.member_cost), hsa_offset: r2(eff.hsa_offset), total: r2(eff.total) });
     }
     results.push({ label: labelConfig(cfg), kind: cfg.parts.length === 1 ? "all" : "split", total: r2(total), premium: r2(premium),

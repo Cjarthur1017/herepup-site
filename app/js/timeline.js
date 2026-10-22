@@ -65,7 +65,7 @@ export function buildOptions(household, employers, claims, { mult = 1, countHsa 
     const lines = [], parts = [];
     for (const p of cfg.parts) {
       const sims = sets.map((set) => simulate(p.plan, set, p.covered, mult));
-      const eff = effectiveCost(p.plan, p.tier, sims.reduce((a, x) => a + x.member_cost, 0) / n, countHsa);
+      const eff = effectiveCost(p.plan, p.tier, sims.reduce((a, x) => a + x.member_cost, 0) / n, countHsa, p.deps);
       premium += eff.premium; hsa += eff.hsa_offset;
       parts.push({ employer: p.employer_name, plan: p.plan.name || "plan", who: p.covered.map(name), tier: p.tier,
         ded_ind: num(p.plan.deductible_ind), ded_fam: p.plan.deductible_fam == null ? num(p.plan.deductible_ind) : num(p.plan.deductible_fam),

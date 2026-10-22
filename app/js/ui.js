@@ -12,6 +12,7 @@ const CX_TEST = CX.testMode(); // direct insurer connections, in testing: /app/?
 const cxCheck = {};
 const STEPS = ["Household", "Plan documents", "Claims", "Your answer", "Your spending"];
 const TIERS = [["ee", "Employee only"], ["ee_sp", "Employee + spouse"], ["ee_ch", "Employee + children"], ["family", "Family"]];
+const byCount = (p) => { const bc = p && p.premium_by_count; const e = bc ? Object.entries(bc).filter(([k]) => /^[1-9]$/.test(k)).sort((a, b) => a[0] - b[0]) : []; return e.length ? e : null; };
 const TIER_WORDS = { ee: "employee only", ee_sp: "employee + spouse", ee_ch: "employee + children", family: "family" };
 const S = { step: 0, members: [], employers: [], currentPlan: "", saved: { claims: 0 }, review: null, hints: {}, detected: [], preview: null, settings: {}, drag: "", insurer: "", spending: null, busy: "", analysis: null, timeline: null, answerTab: "year", spendTab: "spend", billForm: { estimate: { selfPay: "yes" }, surprise: { kind: "emergency" }, md: { er: "no", told: "unsure", signed: "unsure" }, cash: { meetDed: "no" } }, billRes: {}, billTool: "", billNoticed: null, billChecks: null, billAmounts: {}, hsaGate: false, mult: 1, hsa: true, msg: "", err: "" };
 const $ = (s) => document.querySelector(s);
@@ -141,9 +142,13 @@ const rxSummary = (p) => {
 
 function planCard(e, ei, p, pi) {
   const hints = S.hints[`${ei}:${pi}`];
+  const bc = byCount(p);
   const tierRows = TIERS.map(([k, label]) => `<tr class="tier"><td>${label}</td>
-    <td><input type="number" min="0" aria-label="${label} premium" ${bind(`${ei}.plans.${pi}.premium_annual.${k}`, "employers")} value="${p.premium_annual[k] ?? 0}"></td>
+    ${bc ? "" : `<td><input type="number" min="0" aria-label="${label} premium" ${bind(`${ei}.plans.${pi}.premium_annual.${k}`, "employers")} value="${p.premium_annual[k] ?? 0}"></td>`}
     <td><input type="number" min="0" aria-label="${label} employer HSA" ${bind(`${ei}.plans.${pi}.hsa_employer.${k}`, "employers")} value="${p.hsa_employer[k] ?? 0}"></td></tr>`).join("");
+  // Plans priced by headcount: one premium per number of people covered besides the employee.
+  const countRows = bc ? [["ee", "Employee only", `premium_annual.ee`, p.premium_annual.ee], ...bc.map(([k, v], j) => [k, `Employee + ${k}${j === bc.length - 1 ? " or more" : ""}`, `premium_by_count.${k}`, v])]
+    .map(([, label, path, v]) => `<tr class="tier"><td>${label}</td><td><input type="number" min="0" aria-label="${label} premium" ${bind(`${ei}.plans.${pi}.${path}`, "employers")} value="${v ?? 0}"></td></tr>`).join("") : "";
   const chips = hints ? Object.entries(hints).map(([k, arr]) => arr.slice(0, 3).map((h) => `<span class="chip">${esc(k)} ${esc(h.value)} <small class="muted">"${esc(h.snippet.slice(0, 70))}"</small>
       <button class="btn small" data-act="hint" data-e="${ei}" data-p="${pi}" data-k="${k}" data-v="${esc(h.value)}" data-w="fam">${k === "deductible" || k === "oop" ? "use as family" : "use"}</button>
       ${k === "deductible" || k === "oop" ? `<button class="btn small" data-act="hint" data-e="${ei}" data-p="${pi}" data-k="${k}" data-v="${esc(h.value)}" data-w="ind">use as individual</button>` : ""}</span>`).join("")).join("") : "";
@@ -157,6 +162,7 @@ function planCard(e, ei, p, pi) {
       <label>Family out-of-pocket max<input type="number" min="0" ${bind(`${ei}.plans.${pi}.oop_fam`, "employers")} value="${p.oop_fam}"></label>
       <label>Coinsurance (your share, %)<input type="number" min="0" max="100" data-pct="1" ${bind(`${ei}.plans.${pi}.coinsurance`, "employers")} value="${Math.round((p.coinsurance ?? 0.2) * 100)}"></label></div>
     <div class="row"><label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" ${bind(`${ei}.plans.${pi}.embedded`, "employers")} ${p.embedded ? "checked" : ""}>Each person has their own deductible inside the family one (embedded)</label>
+    <label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" ${bind(`${ei}.plans.${pi}.oop_embedded`, "employers")} ${(p.oop_embedded ?? p.embedded) ? "checked" : ""}>Each person has their own out-of-pocket cap inside the family one</label>
     <label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" ${bind(`${ei}.plans.${pi}.hsa_eligible`, "employers")} ${p.hsa_eligible ? "checked" : ""}>HSA-eligible plan (count employer HSA money)</label>
     <label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" ${bind(`${ei}.plans.${pi}.rx_in_deductible`, "employers")} ${p.rx_in_deductible ? "checked" : ""}>Prescriptions count toward the deductible</label></div>
     ${(p.flags || []).length ? `<div class="warn"><b>Check these:</b><ul>${p.flags.map((f) => `<li>${esc(f)}</li>`).join("")}</ul></div>` : ""}
@@ -169,7 +175,9 @@ function planCard(e, ei, p, pi) {
     ${rxTierTable(ei, pi, p)}
     <div class="row"><label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" ${bind(`${ei}.plans.${pi}.copay_after_ded`, "employers")} ${p.copay_after_ded ? "checked" : ""}>Copays apply only after the deductible is met</label></div>
     <p class="muted hsa-status">${p.hsa_checked ? (p.hsa_eligible ? `<span class="chip">HSA confirmed: ${hsaSummary(p)}</span>` : `<span class="chip">Confirmed: no HSA</span>`) : "You'll confirm this plan's HSA money on the next screen."}</p>
-    <div class="scroll"><table style="margin-top:8px"><thead><tr><th>Coverage level</th><th>Your annual premium ($)</th><th>Employer HSA ($/yr)</th></tr></thead><tbody>${tierRows}</tbody></table></div></div>`;
+    ${bc ? `<div class="scroll"><table style="margin-top:8px"><thead><tr><th>People covered</th><th>Your annual premium ($)</th></tr></thead><tbody>${countRows}</tbody></table></div>
+    <p class="muted">This plan is priced by how many people it covers, so HerePup prices each option by its headcount.</p>` : ""}
+    <div class="scroll"><table style="margin-top:8px"><thead><tr><th>Coverage level</th>${bc ? "" : "<th>Your annual premium ($)</th>"}<th>Employer HSA ($/yr)</th></tr></thead><tbody>${tierRows}</tbody></table></div></div>`;
 }
 
 // Guides that price plans by pay band and/or tobacco use: ask, then fill each plan's premiums from the guide's table.
@@ -177,7 +185,7 @@ function applyPremiumChoice(e) {
   const c = e.premium_choice; if (!c) return;
   for (const p of e.plans) {
     const row = (p.premium_table || []).find((r) => (r.band == null || r.band === c.band) && (r.tobacco == null || r.tobacco === !!c.tobacco_user));
-    if (row) p.premium_annual = { ...row.premium_annual };
+    if (row) { p.premium_annual = { ...row.premium_annual }; if (row.premium_by_count) p.premium_by_count = { ...row.premium_by_count }; }
   }
   S.analysis = null; S.timeline = null;
 }
@@ -269,11 +277,11 @@ function stepPlans() {
   const found = S.detected.map((d, di) => `<div class="card" style="border-color:#1F7A7A"><h2>${d.plans.length ? `Found ${d.plans.length} plan option(s) in ${esc(d.file)}` : `No plan table found in ${esc(d.file)}`}</h2>
     ${d.message ? `<div class="warn">${esc(d.message)}</div>` : ""}
     ${(d.notes || []).map((n) => `<p class="muted">${esc(n)}</p>`).join("")}
-    ${d.plans.length ? `<div class="scroll"><table><thead><tr><th>Plan</th><th>Deductible (person / family)</th><th>Out-of-pocket max</th><th>Visit copays</th><th>Drug tiers (generic / brand / non-preferred)</th><th>Premium per year (you / you+spouse / you+kids / family)</th></tr></thead><tbody>
+    ${d.plans.length ? `<div class="scroll"><table><thead><tr><th>Plan</th><th>Deductible (person / family)</th><th>Out-of-pocket max</th><th>Visit copays</th><th>Drug tiers (generic / brand / non-preferred)</th><th>Premium per year (you / you+spouse / you+kids / family, or by people covered)</th></tr></thead><tbody>
       ${d.plans.map((p) => `<tr><td>${esc(p.name)}</td><td>${usd(p.deductible_ind)} / ${usd(p.deductible_fam)}</td><td>${usd(p.oop_ind)} / ${usd(p.oop_fam)}</td>
       <td>${p.copays && p.copays.office != null ? `${usd(p.copays.office)} / ${usd(p.copays.specialist)}${p.copay_after_ded ? " after deductible" : ""}` : "none found"}</td>
       <td>${esc(rxSummary(p))}</td>
-      <td>${usd(p.premium_annual.ee)} / ${usd(p.premium_annual.ee_sp)} / ${usd(p.premium_annual.ee_ch)} / ${usd(p.premium_annual.family)}</td></tr>`).join("")}</tbody></table></div>
+      <td>${byCount(p) ? `you ${usd(p.premium_annual.ee)}${byCount(p).map(([k, v], j, a) => ` · +${k}${j === a.length - 1 ? " or more" : ""} ${usd(v)}`).join("")}` : `${usd(p.premium_annual.ee)} / ${usd(p.premium_annual.ee_sp)} / ${usd(p.premium_annual.ee_ch)} / ${usd(p.premium_annual.family)}`}</td></tr>`).join("")}</tbody></table></div>
     <div class="row" style="margin-top:12px"><label>Employer name<input id="det-emp-${di}" data-det="${di}" data-det-field="employer" value="${esc(d.employer || "")}"></label>
     <label>Who works there?<select id="det-sub-${di}" data-det="${di}" data-det-field="sub"><option value="">Choose...</option>${memberOpts(d.sub || "")}</select></label>
     <button class="btn primary" data-act="add-detected" data-i="${di}">Add this employer with these plans</button><button class="btn" data-act="clear-detected" data-i="${di}">Dismiss</button></div>
@@ -517,7 +525,7 @@ function stepAnswer() {
   const second = a.second_gap != null ? `About ${usd(a.second_gap)} less than the next best option.` : "";
   const others = a.ranked.slice(0, 6).map((r, i) => `<tr class="${i === 0 ? "ok" : ""}"><td>${esc(r.label)}</td><td>${usd(r.premium)}</td><td>${usd(r.member_cost)}</td><td>${r.hsa_offset ? "-" + usd(r.hsa_offset) : "$0"}</td><td><b>${usd(r.total)}</b></td></tr>`).join("");
   const nameOf = (id) => (S.members.find((m) => m.id === id) || {}).name || id;
-  const who = b.detail.map((d) => `<li><b>${esc(d.employer)}: ${esc(d.plan)}</b> covers ${d.covered.map((c) => esc(nameOf(c))).join(", ")} (${esc(TIER_WORDS[d.tier] || d.tier)})</li>`).join("");
+  const who = b.detail.map((d) => `<li><b>${esc(d.employer)}: ${esc(d.plan)}</b> covers ${d.covered.map((c) => esc(nameOf(c))).join(", ")} (${esc(d.by_count && d.deps ? `employee + ${d.deps}` : TIER_WORDS[d.tier] || d.tier)})</li>`).join("");
   const bs = a.basis || { short: "your claims history", options: [] }, short = esc(bs.short);
   const flips = a.break_even.flips.length ? a.break_even.flips.map((f) => `<li>Between ${Math.round(f.between[0] * 100)}% and ${Math.round(f.between[1] * 100)}% of the care in ${short}, the best choice changes from <b>${esc(f.from)}</b> to <b>${esc(f.to)}</b>.</li>`).join("") : `<li>The same option wins at every level of care we tested, from none to three times the care in ${short}.</li>`;
   const picker = basisPicker(bs, "basis", "Which year of your history should HerePup plan around?") + (bs.options.length && bs.note ? `<p class="muted small">${esc(bs.note)}</p>` : "");
