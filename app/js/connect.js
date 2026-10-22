@@ -272,7 +272,7 @@ export async function pull(cid, onProgress = () => {}) {
           throw new Error(`${c.name} refused the request for ${part} (401${why ? `: ${why}` : ""}). `
             + `${mins != null ? `You signed in ${mins} minute${mins === 1 ? "" : "s"} ago. ` : ""}Press Connect, sign in again, and the claims are pulled right away.`);
         }
-        const e = new Error(`${c.name} returned ${r.status} for ${part}${why ? `: ${why}` : "."}`); e.status = r.status; throw e;
+        const e = new Error(`${c.name} returned ${r.status} for ${part}${why ? ` (${why})` : ""}.`); e.status = r.status; throw e;
       }
       const b = await r.json();
       if (b.resourceType === "Bundle") {
@@ -285,7 +285,12 @@ export async function pull(cid, onProgress = () => {}) {
     return out;
   }
   const path = (p, q = "") => `${base}/${p}${c.slash ? "/" : ""}${q ? "?" + q : ""}`;
-  const tolerant = async (url, max, label) => { try { return await getAll(url, max); } catch (e) { if (e.blocked || !e.status) throw e; notes.push(`${label}: ${e.message}`); return []; } };
+  let noMember = false; // the insurer has no member record for this sign-in at all
+  const tolerant = async (url, max, label) => { try { return await getAll(url, max); } catch (e) {
+    if (e.blocked || !e.status) throw e;
+    if (label === "Member" && e.notFound) noMember = true;
+    notes.push(`${label}: ${e.message}`); return [];
+  } };
   const pid = tok.patient, got = [];
   if (!pid && c.noPatientHint) { disconnect(cid); throw new Error(c.noPatientHint); }
   if (pid) {
@@ -309,7 +314,7 @@ export async function pull(cid, onProgress = () => {}) {
     if (/^(Practitioner|Organization)\//.test(rr) && !have.has(rr)) refs.add(rr);
   }
   for (const rr of [...refs].slice(0, 60)) got.push(...await tolerant(path(rr), 1, "Provider"));
-  return { resources: got, eobs: eobs.filter((r) => r.resourceType === "ExplanationOfBenefit").length, env: tok.env, notes };
+  return { resources: got, eobs: eobs.filter((r) => r.resourceType === "ExplanationOfBenefit").length, env: tok.env, notes, noMember };
 }
 
 // What can this browser reach? Harmless requests shaped like the real ones (a made-up client, code and token), so

@@ -429,8 +429,10 @@ async function cxPull(cid) {
     if (!got.eobs) {
       const cov = CX.coverageLine(got.resources), member = got.resources.some((r) => r.resourceType === "Patient");
       fetchEnd("claims", false, `${c.name} returned no claims for this member.`);
-      S.busy = ""; S.msg = `${c.name} signed you in${member || cov ? ` and shared ${[member ? "your member record" : "", cov].filter(Boolean).join(" and ")}` : ""}, but has no claims it will share through this connection. `
-        + `${c.covers} You can still download your claims from ${c.name}'s member site and drop them in (steps on the right).`
+      S.busy = ""; S.msg = (got.noMember && !cov
+          ? `${c.name} signed you in, but its claims-sharing system has no member record for this account. That usually means the plan on this account isn't one ${c.name} shares this way (employer plans that pay their own claims usually aren't), or no medical plan is attached to the account yet. `
+          : `${c.name} signed you in${member || cov ? ` and shared ${[member ? "your member record" : "", cov].filter(Boolean).join(" and ")}` : ""}, but has no claims it will share through this connection. ${c.covers} `)
+        + `You can still download your claims from ${c.name}'s member site and drop them in (steps on the right).`
         + `${got.notes.length ? ` Details: ${got.notes.join(" ")}` : ""}`;
       render(); return;
     }
