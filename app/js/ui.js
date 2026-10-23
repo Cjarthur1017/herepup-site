@@ -20,7 +20,7 @@ const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const usd = (n) => (n == null ? "" : (n < 0 ? "-$" : "$") + Math.abs(Math.round(n)).toLocaleString("en-US"));
 const uid = () => Math.random().toString(36).slice(2, 8);
 // Anonymous step counts (see /privacy/#usage): only the step's name is sent, once per page load. Never any data.
-const STEP_EVENTS = new Set(["Plan added", "Claims added", "Answer shown", "Month by month opened", "Feedback clicked", "Check a bill opened", "Bill checked", "Guide sent"]);
+const STEP_EVENTS = new Set(["Plan added", "Claims added", "Answer shown", "Month by month opened", "Feedback clicked", "Check a bill opened", "Bill checked"]);
 const tracked = new Set();
 function track(name) {
   if (!STEP_EVENTS.has(name) || tracked.has(name)) return;
@@ -258,7 +258,7 @@ function missCard(m, mi) {
     <div class="row">${m.manual ? "" : `<button class="btn primary" data-act="miss-manual" data-i="${mi}">${names.length ? `Enter these ${names.length} plans by hand` : "Enter the plans by hand"}</button>`}
       ${m.candidates.length > 1 ? `<button class="btn" data-act="miss-next" data-i="${mi}">Show another likely page</button>` : ""}
       <button class="btn" data-act="miss-close" data-i="${mi}">${m.manual ? "Done, hide this page" : "Dismiss"}</button></div>
-    ${sendGuide("miss", mi)}</div>`;
+    </div>`;
 }
 function loadMissImages() {
   for (const m of S.guideMiss) {
@@ -268,23 +268,6 @@ function loadMissImages() {
     renderPage(m.file, c.page).then((url) => { m.img[c.page] = url; }).catch(() => { (m.imgErr ||= {})[c.page] = true; })
       .finally(() => { m.loading = 0; if (S.step === 1) render(); });
   }
-}
-
-// "Send this guide to HerePup": with the person's go-ahead, the guide goes to HerePup's sign-in helper, which keeps it
-// (at most 180 days) so the reader can learn its layout. Only the guide; never claims or anything else.
-const guideOwner = (kind, i) => (kind === "det" ? S.detected[i] : S.guideMiss[i]);
-function sendGuide(kind, i) {
-  const o = guideOwner(kind, i), file = o && (o.fileObj || o.file);
-  if (!file) return "";
-  const st = o.send || {};
-  if (st.done) return `<p class="muted"><span aria-hidden="true">&#10003;</span> Sent. Thank you: HerePup will learn this guide's layout, then delete the copy.</p>`;
-  if (!st.open) return `<p class="muted">${kind === "det" ? "Something read wrong? " : ""}<button type="button" class="linkbtn" data-act="guide-send-open" data-kind="${kind}" data-i="${i}">Send this guide to HerePup</button> so guides like it read correctly next time.</p>`;
-  if (st.unavailable) return `<p class="muted">Sending from the app isn't switched on yet. You can email the guide to <a href="mailto:chris@herepup.health?subject=A%20benefit%20guide%20HerePup%20didn't%20read">chris@herepup.health</a> instead.</p>`;
-  return `<div class="send-guide"><p>HerePup uses the guide only to teach the reader its layout, and deletes it once that's done (within 180 days at most). Nothing else from this device is sent.</p>
-    <label class="cx-consent"><input type="checkbox" data-guide-ok data-kind="${kind}" data-i="${i}" ${st.ok ? "checked" : ""}><span>This is my employer's general benefit guide. It doesn't show my name, employee ID, pay or anyone's health information.</span></label>
-    <div class="row"><button class="btn primary" data-act="guide-send" data-kind="${kind}" data-i="${i}" ${st.ok && !st.busy ? "" : "disabled"}>${st.busy ? "Sending..." : "Send the guide"}</button>
-    <button class="btn" data-act="guide-send-cancel" data-kind="${kind}" data-i="${i}">Cancel</button></div>
-    ${st.err ? `<p class="err">${esc(st.err)}</p>` : ""}</div>`;
 }
 
 function addGuideTo(ei, r, file) {
@@ -361,7 +344,7 @@ function stepPlans() {
     <div class="row" style="margin-top:12px"><label>Employer name<input id="det-emp-${di}" data-det="${di}" data-det-field="employer" value="${esc(d.employer || "")}"></label>
     <label>Who works there?<select id="det-sub-${di}" data-det="${di}" data-det-field="sub"><option value="">Choose...</option>${memberOpts(d.sub || "")}</select></label>
     <button class="btn primary" data-act="add-detected" data-i="${di}">Add this employer with these plans</button><button class="btn" data-act="clear-detected" data-i="${di}">Dismiss</button></div>
-    <p class="muted">You can edit every number after adding it. Flags under each plan list what to double-check.</p>${sendGuide("det", di)}` : `<div class="row"><button class="btn" data-act="clear-detected" data-i="${di}">Dismiss</button></div>`}</div>`).join("");
+    <p class="muted">You can edit every number after adding it. Flags under each plan list what to double-check.</p>` : `<div class="row"><button class="btn" data-act="clear-detected" data-i="${di}">Dismiss</button></div>`}</div>`).join("");
   const misses = S.guideMiss.map((m, mi) => (m.ei == null ? missCard(m, mi) : "")).join("");
   const uploadCard = dropZone("plan", "Drop your benefit guides here and we'll fetch the details", "PDF guides from each employer, typed or scanned. Drop several at once. HerePup finds every plan option in each one.") + misses + found;
   return `<h1>What plans can your household choose from?</h1><p class="lead">Drop in each employer's benefit guide. We read out the plan options, you confirm them.</p><!--MSG-->${uploadCard}${emps}
@@ -881,29 +864,6 @@ document.addEventListener("click", async (ev) => {
       S.msg = `Added ${names.length} plan option(s)${e.name ? ` to ${e.name}` : ""}. Type each plan's numbers from page ${c ? c.page : "the plan chart"}; amounts HerePup could see are offered under each plan.`;
       render();
     }
-    else if (act === "guide-send-open") {
-      const o = guideOwner(t.dataset.kind, +t.dataset.i); if (!o) return;
-      o.send = { open: true }; render();
-      try { const h = await CX.helperInfo(CX.helperUrl()); if (!h.guides) o.send.unavailable = true; } catch (e) { o.send.unavailable = true; }
-      render();
-    }
-    else if (act === "guide-send-cancel") { const o = guideOwner(t.dataset.kind, +t.dataset.i); if (o) o.send = {}; render(); }
-    else if (act === "guide-send") {
-      const o = guideOwner(t.dataset.kind, +t.dataset.i), st = o && o.send;
-      if (!st || !st.ok || st.busy) return;
-      const file = o.fileObj || o.file;
-      st.busy = true; st.err = ""; render();
-      try {
-        const fd = new FormData();
-        fd.append("guide", file, file.name);
-        fd.append("result", t.dataset.kind === "miss" ? "no table" : (o.checks || []).length ? "checks" : "read wrong");
-        const r = await fetch(CX.helperUrl() + "/guide", { method: "POST", body: fd, credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer" });
-        const j = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(j.error_description || `The guide couldn't be sent (${r.status}). Try again in a minute.`);
-        st.done = true; track("Guide sent");
-      } catch (e) { st.err = e.message || "The guide couldn't be sent. Try again in a minute."; }
-      st.busy = false; render();
-    }
     else if (act === "add-people") {
       const add = S.review.new_people.map((n, k) => ({ id: uid(), name: n.split(" ")[0].charAt(0).toUpperCase() + n.split(" ")[0].slice(1).toLowerCase(), role: $("#np-" + k).value }));
       const have = new Set(S.members.map((m) => m.name.toLowerCase()));
@@ -1062,7 +1022,7 @@ async function readFiles(files, zone, order, title = "") {
         const onEmp = zone.startsWith("plan:") ? +zone.split(":")[1] : null;
         if (!det.plans.length && !r.message) S.guideMiss.push({ name: f.name, file: f, pages: r.pages || [], candidates: det.candidates || [], at: 0, ei: onEmp, employer: det.employer || "", img: {}, manual: false });
         if (onEmp != null) addGuideTo(onEmp, r, f.name);
-        else if (det.plans.length || r.message) S.detected.push({ ...det, message: r.message, file: f.name, fileObj: f, pages: r.pages || [] });
+        else if (det.plans.length || r.message) S.detected.push({ ...det, message: r.message, file: f.name, pages: r.pages || [] });
       } else results.push(r);
     } catch (e) { errors.push(e.message || String(e)); }
   }
@@ -1114,7 +1074,6 @@ document.addEventListener("change", async (ev) => {
       d.checks = checkPlans(d.plans, d.pages);
       render(); return;
     }
-    if (t.dataset.guideOk !== undefined) { const o = guideOwner(t.dataset.kind, +t.dataset.i); if (o && o.send) { o.send.ok = t.checked; render(); } return; }
     if (t.dataset.act === "drop-pick" && t.files.length) { const fl = [...t.files]; t.value = ""; await handleFiles(fl, t.dataset.kind); return; }
     if (t.dataset.act === "guide-file" && t.files[0]) {
       S.err = ""; S.detected = null; S.busy = "Reading " + t.files[0].name + ". Scanned guides can take a minute or two..."; render();

@@ -304,5 +304,3 @@ label.pref{align-items:flex-start;padding:8px 0}label.pref input{margin-top:4px}
 .miss-page { margin: 10px 0; max-height: 70vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .miss-page img { display: block; width: 100%; height: auto; }
 .miss-page p { padding: 16px; margin: 0; }
-.send-guide { margin-top: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--teal-l); }
-.send-guide p { margin: 0 0 8px; }
