@@ -5,6 +5,7 @@ import * as R from "./readers.js";
 import * as I from "./insights.js";
 import * as T from "./timeline.js";
 import * as Y from "./years.js";
+import * as X from "./expected.js";
 
 const KEY = "herepup.v1";
 const TIERS = ["ee", "ee_sp", "ee_ch", "family"];
@@ -182,6 +183,29 @@ function hsaCheck(employers) {
   if (miss.length) { const err = new Error(`Confirm the employer HSA money for ${miss.join(", ")} first.`); err.code = "hsa"; throw err; }
 }
 // "Plans to consider": every plan, only HSA plans, or only plans without an HSA. Plan objects are kept as-is.
+// The birth under each scenario: the best option and how the top options compare, plus what the birth adds to the
+// option shown (premiums for adding the baby, and your share of the bills).
+function expectedSummary(s, birth, res, basis, use, mult, countHsa) {
+  const e = s.settings.expected, runs = X.SCENARIOS.map((sc, i) => {
+    if (i === birth.info.scenario) return res;
+    const b = X.addBirth(s.household, basis.sets, basis.window, e, i);
+    return E.analyze(b.household, use, b.sets.length > 1 ? b.sets : b.sets[0], mult, countHsa);
+  });
+  const totals = runs.map((r) => new Map(r.ranked.map((x) => [x.label, x.total])));
+  const labels = [];
+  for (const r of runs) if (r.best && !labels.includes(r.best.label)) labels.push(r.best.label);
+  for (const x of res.ranked) if (labels.length < 4 && !labels.includes(x.label)) labels.push(x.label);
+  const rows = labels.slice(0, 4).map((label) => ({ label, totals: totals.map((m) => (m.has(label) ? m.get(label) : null)) }));
+  // without the birth: the same option, same household as today
+  const real = basis.sets.length > 1 ? basis.sets : basis.sets[0];
+  const without = E.analyze(s.household, use, real, mult, countHsa);
+  const before = without.ranked.find((x) => x.label === res.best.label) || null;
+  const adds = before ? { total: Math.round((res.best.total - before.total) * 100) / 100, premium: Math.round((res.best.premium - before.premium) * 100) / 100,
+    care: Math.round((res.best.member_cost - before.member_cost) * 100) / 100, hsa: Math.round((res.best.hsa_offset - before.hsa_offset) * 100) / 100 } : null;
+  return { ready: true, ...birth.info, scenarios: X.SCENARIOS.map((sc, i) => ({ key: sc.key, label: sc.label, best: runs[i].best ? runs[i].best.label : "", total: runs[i].best ? runs[i].best.total : null })),
+    rows, adds, without_best: without.best ? { label: without.best.label, total: without.best.total } : null, source: X.SOURCE };
+}
+
 const planTypes = (s) => ((s.settings || {}).plan_types === "hsa" || (s.settings || {}).plan_types === "non_hsa" ? s.settings.plan_types : "all");
 function pickPlans(employers, pref) {
   if (pref === "all") return employers;
@@ -244,33 +268,39 @@ export async function handle(method, path, body, file) {
     if (!employers.length) throw new Error("Add at least one employer plan first.");
     const usable = s.claims.filter((c) => c.allowed);
     if (s.claims.length - usable.length) warnings.push(`${s.claims.length - usable.length} claim(s) have no allowed amount and were left out.`);
-    if (!usable.length) throw new Error("Add claims with allowed amounts first.");
+    const exp = X.settingsOf((s.settings || {}).expected, s.household.members);
+    if (!usable.length && !exp.ready) throw new Error(exp.on ? "Add the due month to plan around the birth, or add claims with allowed amounts." : "Add claims with allowed amounts first.");
     const basis = Y.select(usable, (s.settings || {}).basis); // which year of the history to plan around
-    const use_claims = basis.sets.length > 1 ? basis.sets : basis.sets[0];
+    // Expecting a baby: the birth's usual bills (national averages) join your claims, and the baby joins the household
+    const birth = exp.ready ? X.addBirth(s.household, basis.sets, basis.window, s.settings.expected) : null;
+    const hh = birth ? birth.household : s.household, sets = birth ? birth.sets : basis.sets;
+    const use_claims = sets.length > 1 ? sets : sets[0];
     const ids = new Set(s.household.members.map((m) => m.id));
     for (const e of employers) if (!ids.has(e.subscriber)) throw new Error(`Pick the household member who works at ${e.name}.`);
     hsaCheck(employers);
     const pref = planTypes(s), picked = pickPlans(employers, pref);
     if (pref !== "all" && !picked.length) warnings.push(`None of your plan options ${pref === "hsa" ? "come with an HSA" : "are without an HSA"}, so every plan is shown. Change "Plans to consider" if that's not right.`);
     const use = picked.length ? picked : employers;
-    const res = E.analyze(s.household, use, use_claims, mult, countHsa);
+    const res = E.analyze(hh, use, use_claims, mult, countHsa);
     res.plan_types = picked.length ? pref : "all";
-    if (res.plan_types !== "all") { const all = E.analyze(s.household, employers, use_claims, mult, countHsa).best; res.all_best = all ? { label: all.label, total: all.total } : null; }
+    if (res.plan_types !== "all") { const all = E.analyze(hh, employers, use_claims, mult, countHsa).best; res.all_best = all ? { label: all.label, total: all.total } : null; }
     const unknown = use.flatMap((e) => e.plans.filter((pl) => pl.hsa_unknown).map((pl) => `${e.name}: ${pl.name}`));
     if (unknown.length) {
       const scenarios = [0, 1500, 3000].map((dep) => {
         const emps2 = clone(use);
         for (const e of emps2) for (const pl of e.plans) if (pl.hsa_unknown) pl.hsa_employer = { ee: dep / 3, ee_sp: dep / 3, ee_ch: dep / 3, family: dep };
-        const r2 = E.analyze(s.household, emps2, use_claims, mult, countHsa);
+        const r2 = E.analyze(hh, emps2, use_claims, mult, countHsa);
         return { family_deposit: dep, best: r2.best.label, total: r2.best.total };
       });
       res.hsa_sensitivity = { plans: unknown, scenarios };
     }
     res.warnings = warnings;
-    res.break_even = E.breakEven(s.household, use, use_claims, countHsa);
+    res.break_even = E.breakEven(hh, use, use_claims, countHsa);
     const cal = calibrateAll(s, employers, usable);
     if (cal) res.calibration = cal;
     res.claims_used = basis.sets.reduce((a, x) => a + x.length, 0);
+    res.has_claims = usable.length > 0;
+    if (exp.on) res.expected = birth ? expectedSummary(s, birth, res, basis, use, mult, countHsa) : { ready: false };
     res.basis = { key: basis.key, label: basis.label, short: basis.short, options: basis.options, years: basis.years, note: basis.note || "" };
     const obs = s.observed;
     if (obs && obs.ded_fam_met) {
@@ -283,13 +313,17 @@ export async function handle(method, path, body, file) {
   }
   if (method === "POST" && p === "/api/timeline") {
     const employers = s.employers.filter((e) => (e.plans || []).length), usable = s.claims.filter((c) => c.allowed);
-    if (!s.household.members.length || !employers.length || !usable.length) return { window: T.planWindow(usable), options: [], defaults: [] };
+    const exp = X.settingsOf((s.settings || {}).expected, s.household.members);
+    if (!s.household.members.length || !employers.length || (!usable.length && !exp.ready)) return { window: T.planWindow(usable), options: [], defaults: [] };
     const picked = pickPlans(employers, planTypes(s)), cp = s.current_plan || {};
     const current = cp.employer ? ((s.employers.find((e) => e.id === cp.employer) || { plans: [] }).plans[cp.plan_index || 0] || null) : null;
     const basis = Y.select(usable, (s.settings || {}).basis);
-    const out = T.buildOptions(s.household, picked.length ? picked : employers, basis.sets.length > 1 ? basis.sets : basis.sets[0],
-      { mult: Number(body.multiplier ?? 1), countHsa: body.count_hsa !== false, current, window: basis.window });
-    out.basis = { key: basis.key, short: basis.short, note: basis.note || "" };
+    const birth = exp.ready ? X.addBirth(s.household, basis.sets, basis.window, s.settings.expected) : null;
+    const sets = birth ? birth.sets : basis.sets;
+    const out = T.buildOptions(birth ? birth.household : s.household, picked.length ? picked : employers, sets.length > 1 ? sets : sets[0],
+      { mult: Number(body.multiplier ?? 1), countHsa: body.count_hsa !== false, current, window: birth ? birth.window : basis.window });
+    out.basis = { key: basis.key, short: usable.length ? basis.short : "", note: basis.note || "" };
+    if (birth) out.expected = birth.info;
     return out;
   }
   if (method === "POST" && p === "/api/spending") {

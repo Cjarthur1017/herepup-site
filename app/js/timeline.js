@@ -1,6 +1,6 @@
 // Month by month: when premiums, your share of care and employer HSA money land through the year.
 // Pure functions (no DOM); runs on the device. The drawing lives in timeline-view.js.
-import { simulate, enumerateConfigs, effectiveCost, analyze, labelConfig, yearSets } from "./engine.js";
+import { simulate, enumerateConfigs, effectiveCost, premiumFor, analyze, labelConfig, yearSets } from "./engine.js";
 
 export const LONG = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const num = (v) => { const x = Number(v); return v == null || v === "" || Number.isNaN(x) ? 0 : x; };
@@ -61,19 +61,29 @@ export function buildOptions(household, employers, claims, { mult = 1, countHsa 
   const dupes = new Set(bases.filter((b, i) => bases.indexOf(b) !== i));
 
   function build(cfg, key, short) {
-    let premium = 0, hsa = 0;
+    let premium = 0, hsa = 0, mixed = false;
     const lines = [], parts = [];
+    // rates: each month's premium and HSA money at that month's coverage level, as a yearly amount (they differ only
+    // when someone joins during the year, like a baby)
+    const rate = Array(12).fill(0), hsaRate = Array(12).fill(0);
     for (const p of cfg.parts) {
       const sims = sets.map((set) => simulate(p.plan, set, p.covered, mult));
-      const eff = effectiveCost(p.plan, p.tier, sims.reduce((a, x) => a + x.member_cost, 0) / n, countHsa, p.deps);
+      const eff = effectiveCost(p.plan, p.tier, sims.reduce((a, x) => a + x.member_cost, 0) / n, countHsa, p.deps, p.mix);
       premium += eff.premium; hsa += eff.hsa_offset;
+      for (let i = 0; i < 12; i++) {
+        const seg = p.mix ? p.mix.find((x) => i + 1 >= x.from && i + 1 <= x.to) : null;
+        if (!seg) { rate[i] += eff.premium; hsaRate[i] += eff.hsa_offset; continue; }
+        const one = effectiveCost(p.plan, seg.tier, 0, countHsa, seg.deps);
+        rate[i] += premiumFor(p.plan, seg.tier, seg.deps); hsaRate[i] += one.hsa_offset;
+      }
+      if (p.mix) mixed = true;
       parts.push({ employer: p.employer_name, plan: p.plan.name || "plan", who: p.covered.map(name), tier: p.tier,
         ded_ind: num(p.plan.deductible_ind), ded_fam: p.plan.deductible_fam == null ? num(p.plan.deductible_ind) : num(p.plan.deductible_fam),
         premium: r2(eff.premium), hsa: r2(eff.hsa_offset) });
       for (const sim of sims) for (const l of sim.lines) {
         const c = byId.get(l.id) || {};
         lines.push({ date: l.date, who: name(l.member), service: c.service || c.rx_drug || c.provider || "Care", provider: c.provider || "",
-          allowed: l.allowed / n, cost: l.member_cost / n, basis: n > 1 ? `${l.basis}; ${String(l.date).slice(0, 4)}, counted as 1/${n}` : l.basis });
+          allowed: l.allowed / n, cost: l.member_cost / n, basis: n > 1 && !c.expected ? `${l.basis}; ${String(c.orig_date || l.date).slice(0, 4)}, counted as 1/${n}` : l.basis });
       }
     }
     lines.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -83,7 +93,7 @@ export function buildOptions(household, employers, claims, { mult = 1, countHsa 
       ? cfg.parts[0].employer === current.employer && cfg.parts[0].plan_index === Number(current.plan_index || 0)
       : cfg.parts[0].plan === current);
     return { key, short, label: labelConfig(cfg), split: !single, pick: same(cfg, best), current: !!cur,
-      premium: r2(premium), hsa: r2(hsa), parts, lines };
+      premium: r2(premium), hsa: r2(hsa), parts, lines, ...(mixed ? { rates: { premium: rate, hsa: hsaRate } } : {}) };
   }
 
   const options = [];
@@ -113,8 +123,10 @@ export function buildOptions(household, employers, claims, { mult = 1, countHsa 
 // Month-by-month amounts for one option. pay = paychecks a year; hsaTiming = "spread" (each paycheck) or "start" (all in month 1).
 export function series(o, w, pay = 24, hsaTiming = "spread") {
   const checks = checksPerMonth(w, pay);
-  const premium = checks.map((k) => (o.premium / pay) * k);
-  const hsa = hsaTiming === "start" ? checks.map((_, i) => (i === 0 ? o.hsa : 0)) : checks.map((k) => (o.hsa / pay) * k);
+  // o.rates (someone joins during the year): each paycheck is the yearly amount for that month's coverage level / pay
+  const pr = o.rates ? o.rates.premium : null, hr = o.rates ? o.rates.hsa : null;
+  const premium = checks.map((k, i) => ((pr ? pr[i] : o.premium) / pay) * k);
+  const hsa = hsaTiming === "start" ? checks.map((_, i) => (i === 0 ? o.hsa : 0)) : checks.map((k, i) => ((hr ? hr[i] : o.hsa) / pay) * k);
   const care = Array(12).fill(0), why = Array.from({ length: 12 }, () => []);
   for (const l of o.lines) { const i = monthIndex(w, l.date); care[i] += l.cost; if (l.allowed > 0) why[i].push(l); }
   const month = care.map((c, i) => ({ premium: premium[i], care: c, hsa: hsa[i], net: premium[i] + c - hsa[i] }));

@@ -8,6 +8,7 @@ import * as CX from "./connect.js";
 import { history as claimHistory } from "./years.js";
 import * as B from "./bills.js";
 import { pdfPages, checkPlans, renderPage, planHints } from "./readers.js";
+import * as X from "./expected.js";
 const CX_TEST = CX.testMode(); // direct insurer connections, in testing: /app/?connect=test
 const cxCheck = {};
 const STEPS = ["Household", "Plan documents", "Claims", "Your answer", "Your spending"];
@@ -92,7 +93,7 @@ async function load() {
   S.settings = st.settings || S.settings;
   const cp = st.current_plan;
   S.currentPlan = cp ? `${cp.employer}:${cp.plan_index}` : "";
-  if (S.members.length && S.employers.length && S.saved.claims) S.step = 3;
+  if (S.members.length && S.employers.length && (S.saved.claims || expReady())) S.step = 3;
   else if (S.members.length && S.employers.length) S.step = 2;
   else if (S.members.length) S.step = 1;
   if (S.step === 3 && !hsaDone()) { S.step = 1; S.hsaGate = true; S.msg = "Before your answer: confirm the employer HSA money for each plan."; }
@@ -120,6 +121,8 @@ function render() {
   const main = $("#main");
   const msg = (S.err ? `<div class="err" role="alert">${esc(S.err)}</div>` : "") + (S.msg ? `<div class="warn" role="status">${esc(S.msg)}</div>` : "");
   main.innerHTML = [stepHousehold, stepPlans, stepClaims, stepAnswer, stepSpending][S.step]() .replace("<!--MSG-->", msg);
+  // a slider or field that re-ran the answer keeps the focus once the answer is back
+  if (S.refocus && (S.step !== 3 || S.analysis)) { const el = document.getElementById(S.refocus); S.refocus = ""; if (el) el.focus(); }
   if (S.step === 1) loadMissImages();
   if (S.step === 3 && !S.analysis) runAnalysis();
   if (S.step === 3 && S.analysis && S.answerTab === "month" && S.timeline) mountTimeline($("#timeline"), S.timeline, { mult: S.mult, countHsa: S.hsa });
@@ -414,6 +417,7 @@ function stepClaims() {
   return `<h1>Add your claims</h1><p class="lead">Drop in your explanations of benefits (EOBs) and claim summaries. The last 12 months is the best starting point; add earlier years to plan around your highest, lowest or average year. We read them on this device, and you check every row.</p><!--MSG-->
   <div class="grid2">${dropZone("claims", "Drop your claims here and we'll fetch the details", "EOB PDFs, claim or pharmacy summaries (CSV or Excel), or a FHIR export from your insurer. Drop several at once; they're combined into one review.")}
   ${insurerCard()}</div>
+  ${S.saved.claims ? "" : expectingCard()}
   ${reviewTable()}
   <div class="row"><button class="btn" data-go="1">Back</button><button class="btn primary" data-act="to-answer">See my answer</button></div>`;
 }
@@ -578,6 +582,82 @@ function fetchEnd(kind, ok, summary) {
   }, Math.max(0, FETCH.WALK - (Date.now() - f.t0)));
 }
 
+// ------------------------------------------------------------------ Expecting a baby (What if)
+// The usual bills of a birth at national average prices, added to the claims HerePup plans around (see expected.js).
+// Everything about it stays in this browser: it's saved with your other settings and never sent or counted.
+const MONTH_LONG = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const expSettings = () => X.settingsOf(S.settings.expected, S.members);
+const expReady = () => expSettings().ready;
+function dueOptions(cur) {
+  const now = new Date(), list = [];
+  for (let i = -2; i <= 10; i++) { const d = new Date(now.getFullYear(), now.getMonth() + i, 1); list.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`); }
+  if (cur && !list.includes(cur)) list.unshift(cur);
+  return `<option value="">Pick a month</option>` + list.map((v) => `<option value="${v}" ${v === cur ? "selected" : ""}>${X.monthName(v)}</option>`).join("");
+}
+function scenarioLine(sc, price) {
+  const b = X.birthBills(sc, price), t = (w) => b.filter((x) => x.who === w).reduce((a, x) => a + x.allowed, 0);
+  return `${X.SCENARIOS[sc].label}: about ${usd(t("mother"))} for the pregnancy and birth, and ${usd(t("baby"))} for the baby's first year, before insurance.`;
+}
+const priceText = (pct) => (pct === 100 ? "the national average" : `${pct}% of the national average`);
+function expFields(e, adults) {
+  const y0 = new Date().getFullYear(), years = [...new Set([y0, y0 + 1, e.year])].sort();
+  return `<div class="exp-fields">
+    <label>Due month<select data-exp="due" id="exp-due">${dueOptions(e.due)}</select></label>
+    ${adults.length > 1 ? `<label>Who's pregnant<select data-exp="mother" id="exp-mother">${adults.map((m) => `<option value="${esc(m.id)}" ${m.id === e.mother ? "selected" : ""}>${esc(m.name)}</option>`).join("")}</select></label>` : ""}
+    <label>Plan year<select data-exp="year" id="exp-year">${years.map((y) => `<option value="${y}" ${y === e.year ? "selected" : ""}>${y}</option>`).join("")}</select></label></div>
+    ${adults.length ? "" : `<p class="need small">Add the person who's pregnant as an adult on step 1.</p>`}`;
+}
+function expectedControls() {
+  const e = expSettings(), adults = S.members.filter((m) => m.role === "adult");
+  const box = `<label class="check-row"><input type="checkbox" data-exp="on" id="exp-on" ${e.on ? "checked" : ""}>We're expecting a baby</label>`;
+  if (!e.on) return `<div class="exp">${box}<p class="muted small">Adds the usual costs of a pregnancy, birth and the baby's first year, at average prices.</p></div>`;
+  const pct = Math.round(e.price * 100);
+  return `<div class="exp">${box}${expFields(e, adults)}
+    <label>How the birth goes <b id="exp-scn-label">${X.SCENARIOS[e.scenario].label}</b>
+      <input type="range" min="0" max="2" step="1" value="${e.scenario}" id="exp-scenario" data-exp="scenario" aria-valuetext="${X.SCENARIOS[e.scenario].label}"></label>
+    <div class="ticks" aria-hidden="true"><span>Typical birth</span><span>C-section</span><span>NICU stay</span></div>
+    <label>Prices where you'll deliver <b id="exp-price-label">${priceText(pct)}</b>
+      <input type="range" min="${X.PRICE.min}" max="${X.PRICE.max}" step="5" value="${pct}" id="exp-price" data-exp="price" aria-valuetext="${priceText(pct)}"></label>
+    <p class="muted small" id="exp-scn-line">${scenarioLine(e.scenario, e.price)}</p>
+    ${e.due ? "" : `<p class="need small">Pick the due month to add the birth to your answer.</p>`}
+    <p class="muted small">Your due date stays on this device. HerePup never sends it anywhere or counts it.</p></div>`;
+}
+// Claims step, when there are no claims yet: someone expecting can still get an answer.
+function expectingCard() {
+  const e = expSettings(), adults = S.members.filter((m) => m.role === "adult");
+  return `<div class="card exp-start"><label class="check-row"><input type="checkbox" data-exp="on" id="exp-on" ${e.on ? "checked" : ""}><b>Expecting a baby?</b></label>
+    <p class="muted">HerePup can add the usual costs of a pregnancy, birth and the baby's first year, at average prices, even with no claims to add. You can change how the birth goes and the prices on Your answer.</p>
+    ${e.on ? expFields(e, adults) + `<p class="muted small">Your due date stays on this device. HerePup never sends it anywhere or counts it.</p>` : ""}</div>`;
+}
+function expectedCard(a) {
+  const x = a.expected;
+  if (!x || !x.ready) return "";
+  const b = a.best, bestOf = (i) => x.scenarios[i].best, ad = x.adds;
+  const same = new Set(x.scenarios.map((s) => s.best)).size === 1;
+  const head = X.SCENARIOS.map((sc, i) => `<th scope="col">${sc.label}${i === x.scenario ? " <span class='muted small'>(shown)</span>" : ""}</th>`).join("");
+  const rows = x.rows.map((r) => `<tr><th scope="row">${esc(r.label)}</th>${r.totals.map((t, i) => `<td>${t == null ? "Not in the top 12" : r.label === bestOf(i) ? `<b>${usd(t)}</b> <span class="pick-tag">Best</span>` : usd(t)}</td>`).join("")}</tr>`).join("");
+  const parts = ad ? [ad.premium > 0.5 ? `${usd(ad.premium)} more in premiums once ${esc(x.baby_name === "Baby" ? "the baby" : x.baby_name)} is on the plan` : "no extra premium",
+    ad.hsa > 0.5 ? `${usd(ad.hsa)} more employer HSA money` : "", `${usd(ad.care)} as your share of the bills`].filter(Boolean) : [];
+  const addLine = ad ? `<p>On <b>${esc(b.label)}</b>, ${esc(x.short)} adds about <b>${usd(ad.total)}</b> to ${x.year}: ${parts.join(", ")}.</p>` : "";
+  const changes = x.without_best ? (x.without_best.label !== b.label
+    ? `<p>The baby changes the answer. Without the birth, <b>${esc(x.without_best.label)}</b> would be cheapest, at ${usd(x.without_best.total)}.</p>`
+    : `<p class="muted">Without the birth, the same option would still be cheapest.</p>`) : "";
+  const born = x.born;
+  const counted = born > 12 ? `The birth falls after ${x.year}, so only prenatal care in ${x.year} is counted.`
+    : born < 1 ? `The baby arrives before ${x.year}, so this counts the baby's care during ${x.year} and any of the mother's care that falls in it.`
+    : `Counts prenatal care in ${x.year}, the birth in ${MONTH_LONG[born - 1]}, and the baby's care through December, with premiums at the higher coverage level from the birth month.`;
+  const notes = [counted,
+    x.before && born >= 1 ? `${x.before} prenatal bill${x.before === 1 ? " falls" : "s fall"} before ${x.year}, so ${x.before === 1 ? "it counts" : "they count"} under your ${x.year - 1} plan, not this one.` : "",
+    x.after ? `The baby's care after December ${x.year} isn't counted.` : "",
+    born <= 12 ? "Add the baby to your plan within 30 days of the birth (some plans allow longer). Coverage then starts on the day the baby is born." : ""].filter(Boolean);
+  return `<div class="card exp-card" aria-labelledby="exp-h"><h2 id="exp-h">The baby, due ${esc(x.due_name)}</h2>${addLine}${changes}
+    <h3>If the birth goes differently</h3>
+    <div class="scroll"><table><thead><tr><th scope="col">Option, total for ${x.year}</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="muted">${same ? "The same option is cheapest however the birth goes." : "The cheapest option depends on how the birth goes. Compare what a C-section or a NICU stay would cost you under each."}</p>
+    <ul class="muted small">${notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>
+    <p class="muted small">Prices are national averages for people on employer plans (<a href="${esc(x.source.url)}" target="_blank" rel="noopener">${esc(x.source.label)}</a>, claims from 2021 to 2023), split into the bills a birth usually brings. Hospitals charge very different prices: your insurer's cost estimator can price the delivery where you plan to give birth, and the price slider shows what that changes.</p></div>`;
+}
+
 function stepAnswer() {
   const a = S.analysis;
   if (!a) return `<h1>Your answer</h1><!--MSG--><p class="lead">Running your claims through every option...</p>`;
@@ -585,7 +665,12 @@ function stepAnswer() {
   const second = a.second_gap != null ? `About ${usd(a.second_gap)} less than the next best option.` : "";
   const others = a.ranked.slice(0, 6).map((r, i) => `<tr class="${i === 0 ? "ok" : ""}"><td>${esc(r.label)}</td><td>${usd(r.premium)}</td><td>${usd(r.member_cost)}</td><td>${r.hsa_offset ? "-" + usd(r.hsa_offset) : "$0"}</td><td><b>${usd(r.total)}</b></td></tr>`).join("");
   const nameOf = (id) => (S.members.find((m) => m.id === id) || {}).name || id;
-  const who = b.detail.map((d) => `<li><b>${esc(d.employer)}: ${esc(d.plan)}</b> covers ${d.covered.map((c) => esc(nameOf(c))).join(", ")} (${esc(d.by_count && d.deps ? `employee + ${d.deps}` : TIER_WORDS[d.tier] || d.tier)})</li>`).join("");
+  const x = a.expected && a.expected.ready ? a.expected : null;
+  const nameOfAll = (id) => (x && id === x.baby_id ? x.baby_name : nameOf(id));
+  const level = (t, deps, bc) => (bc && deps ? `employee + ${deps}` : TIER_WORDS[t] || t);
+  const who = b.detail.map((d) => `<li><b>${esc(d.employer)}: ${esc(d.plan)}</b> covers ${d.covered.map((c) => esc(nameOfAll(c))).join(", ")} (${esc(d.mix
+    ? d.mix.map((m, i) => (i ? `${level(m.tier, m.deps, d.by_count)} from ${MONTH_LONG[m.from - 1]}` : level(m.tier, m.deps, d.by_count))).join(", then ")
+    : level(d.tier, d.deps, d.by_count))})</li>`).join("");
   const bs = a.basis || { short: "your claims history", options: [] }, short = esc(bs.short);
   const flips = a.break_even.flips.length ? a.break_even.flips.map((f) => `<li>Between ${Math.round(f.between[0] * 100)}% and ${Math.round(f.between[1] * 100)}% of the care in ${short}, the best choice changes from <b>${esc(f.from)}</b> to <b>${esc(f.to)}</b>.</li>`).join("") : `<li>The same option wins at every level of care we tested, from none to three times the care in ${short}.</li>`;
   const picker = basisPicker(bs, "basis", "Which year of your history should HerePup plan around?") + (bs.options.length && bs.note ? `<p class="muted small">${esc(bs.note)}</p>` : "");
@@ -606,14 +691,21 @@ function stepAnswer() {
   const pick = S.timeline && S.timeline.options.find((o) => o.pick);
   const q = pick ? quickFacts(pick, S.timeline.window) : null;
   const month = q ? `<p class="muted">Month by month, its biggest month is ${esc(q.peakMonth)} at ${usd(q.peak)}${q.setAside ? `, so set aside about ${usd(q.setAside)} by ${esc(q.setAsideBy)}` : ""}. <button class="linkbtn" data-act="answer-tab" data-tab="month">See month by month</button></p>` : "";
+  const caption = !a.has_claims && x ? `Estimated cost for ${x.year}: premiums plus ${esc(x.short)} in ${esc(x.due_name)}`
+    : `Estimated yearly cost${S.mult !== 1 ? `, at ${Math.round(S.mult * 100)}% of the care in ${short}` : `, if your care looks like ${short}`}${x ? `, plus ${esc(x.short)} in ${esc(x.due_name)}` : ""}`;
+  const care = a.has_claims === false ? `<p class="muted">No claims are added, so this counts the birth, the baby's care and premiums only. <button class="linkbtn" data-go="2">Add claims</button> to include everyone's usual care.</p>`
+    : `<label>How much ${x ? "other " : ""}care do you expect next year, compared with ${short}? <b id="mult-label">${Math.round(S.mult * 100)}%</b>
+    <input type="range" min="0" max="300" step="5" value="${Math.round(S.mult * 100)}" id="mult"></label>`;
+  const flipsBlock = a.has_claims === false ? "" : `<h2 style="margin-top:16px">What would change the answer</h2><ul>${flips}</ul>`;
   return `${head}<div id="answer-panel" role="tabpanel" aria-labelledby="tab-year">
-  <div class="grid2"><div class="card"><div class="muted">Estimated yearly cost${S.mult !== 1 ? `, at ${Math.round(S.mult * 100)}% of the care in ${short}` : `, if your care looks like ${short}`}</div><div class="bignum">${usd(b.total)}</div>
+  <div class="grid2"><div class="card"><div class="muted">${caption}</div><div class="bignum">${usd(b.total)}</div>
     <p>${usd(b.premium)} premiums + ${usd(b.member_cost)} your share of care${b.hsa_offset ? ` - ${usd(b.hsa_offset)} employer HSA money` : ""}. ${second}</p><ul>${who}</ul>${month}${prefNote}</div>
-  <div class="card"><h2>What if...</h2>${picker}<label>How much care do you expect next year, compared with ${short}? <b id="mult-label">${Math.round(S.mult * 100)}%</b>
-    <input type="range" min="0" max="300" step="5" value="${Math.round(S.mult * 100)}" id="mult"></label>
-    <label style="flex-direction:row;align-items:center;gap:8px;margin-top:10px"><input type="checkbox" id="hsa" ${S.hsa ? "checked" : ""}>Count employer HSA money as an offset</label>
+  <div class="card"><h2>What if...</h2>${picker}${care}
+    <label class="check-row"><input type="checkbox" id="hsa" ${S.hsa ? "checked" : ""}>Count employer HSA money as an offset</label>
     <label style="margin-top:12px">Plans to consider<select data-act="plan-types">${[["all", "Every plan"], ["hsa", "Only plans with an HSA"], ["non_hsa", "Only plans without an HSA"]].map(([v, l]) => `<option value="${v}" ${(S.settings.plan_types || "all") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
-    <h2 style="margin-top:16px">What would change the answer</h2><ul>${flips}</ul></div></div>
+    ${expectedControls()}
+    ${flipsBlock}</div></div>
+  ${expectedCard(a)}
   ${a.hsa_sensitivity ? `<div class="card"><h2>Employer HSA deposit is unknown for ${a.hsa_sensitivity.plans.map(esc).join(", ")}</h2><p class="muted">The numbers above assume $0. Here is the best option at each possible family deposit (smaller levels scaled to a third):</p>
     <table><thead><tr><th>Family deposit</th><th>Best option</th><th>Total</th></tr></thead><tbody>${a.hsa_sensitivity.scenarios.map((x) => `<tr><td>${usd(x.family_deposit)}</td><td>${esc(x.best)}</td><td><b>${usd(x.total)}</b></td></tr>`).join("")}</tbody></table></div>` : ""}
   <div class="card"><h2>All the options we tested (top ${Math.min(6, a.ranked.length)} of ${a.count})</h2><div class="scroll"><table><thead><tr><th>Option</th><th>Premiums</th><th>Your care costs</th><th>HSA offset</th><th>Total</th></tr></thead><tbody>${others}</tbody></table></div></div>
@@ -946,7 +1038,7 @@ document.addEventListener("click", async (ev) => {
     }
     else if (act === "discard") { S.review = null; render(); }
     else if (act === "to-answer") {
-      if (!S.saved.claims) throw new Error("Save some claims first.");
+      if (!S.saved.claims && !expReady()) throw new Error(expSettings().on ? "Pick the due month first, or save some claims." : "Save some claims first.");
       if (!hsaDone()) { S.step = 1; S.hsaGate = true; S.msg = "Before your answer: confirm the employer HSA money for each plan."; render(); window.scrollTo(0, 0); return; }
       await saveEmployers(); S.step = 3; S.analysis = null; render();
     }
@@ -1062,6 +1154,13 @@ document.addEventListener("change", async (ev) => {
       if (t.dataset.act === "basis") { S.analysis = null; S.timeline = null; } else S.spending = null;
       render(); return;
     }
+    if (t.dataset.exp) { // Expecting a baby: saved on this device with the other settings, then the answer runs again
+      const k = t.dataset.exp, e = { ...(S.settings.expected || {}) };
+      e[k] = k === "on" ? t.checked : k === "scenario" || k === "year" ? Number(t.value) : k === "price" ? Number(t.value) / 100 : t.value;
+      if (!e.year) e.year = X.defaultYear();
+      S.settings = { ...S.settings, expected: e }; await post("/api/settings", S.settings, "PUT");
+      S.analysis = null; S.timeline = null; S.refocus = t.id; render(); return;
+    }
     if (t.dataset.act === "plan-types") {
       S.settings = { ...S.settings, plan_types: t.value }; await post("/api/settings", S.settings, "PUT");
       S.analysis = null; S.timeline = null; render(); return;
@@ -1121,7 +1220,7 @@ document.addEventListener("change", async (ev) => {
       setPath(root, t.dataset.bind, v);
       if (t.dataset.bind.endsWith(".subscriber") || t.dataset.bind.endsWith(".name")) { /* no re-render to keep focus */ }
     }
-    if (t.id === "mult") { S.mult = Number(t.value) / 100; S.analysis = null; render(); }
+    if (t.id === "mult") { S.mult = Number(t.value) / 100; S.analysis = null; S.refocus = "mult"; render(); }
     if (t.id === "hsa") { S.hsa = t.checked; S.analysis = null; render(); }
   } catch (e) { S.err = e.message; render(); }
 });
@@ -1138,6 +1237,10 @@ document.addEventListener("input", (ev) => {
   const t = ev.target;
   if (t.dataset && t.dataset.bf && t.tagName === "INPUT") { const [tool, k] = t.dataset.bf.split("."); (S.billForm[tool] ||= {})[k] = t.value; return; }
   if (t.id === "mult") $("#mult-label").textContent = t.value + "%";
+  if (t.id === "exp-scenario") { const sc = X.SCENARIOS[+t.value]; $("#exp-scn-label").textContent = sc.label; t.setAttribute("aria-valuetext", sc.label);
+    $("#exp-scn-line").textContent = scenarioLine(+t.value, expSettings().price); }
+  if (t.id === "exp-price") { const txt = priceText(+t.value); $("#exp-price-label").textContent = txt; t.setAttribute("aria-valuetext", txt);
+    $("#exp-scn-line").textContent = scenarioLine(Number($("#exp-scenario").value), +t.value / 100); }
 });
 
 // ---- drag and drop

@@ -304,3 +304,15 @@ label.pref{align-items:flex-start;padding:8px 0}label.pref input{margin-top:4px}
 .miss-page { margin: 10px 0; max-height: 70vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .miss-page img { display: block; width: 100%; height: auto; }
 .miss-page p { padding: 16px; margin: 0; }
+/* expecting a baby (What if) */
+.check-row{flex-direction:row;align-items:center;gap:8px;margin-top:10px}
+.exp{border-top:1px solid var(--line);margin-top:16px;padding-top:12px;display:flex;flex-direction:column;gap:10px}
+.exp .check-row{margin-top:0;font-weight:700;color:var(--navy)}
+.exp-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.exp-fields select{width:100%;min-width:0}
+.ticks{display:flex;justify-content:space-between;font-size:13px;color:var(--ink);margin-top:-8px}
+.exp .need{margin:0}
+.exp-start .check-row{margin-top:0;font-size:17px;color:var(--navy)}
+.exp-card h3{font-size:18px;margin:16px 0 6px}
+.exp-card ul{padding-left:20px}
+.pick-tag{font-size:12px;font-weight:700;background:var(--teal-l);color:var(--navy);padding:1px 7px;border-radius:999px;white-space:nowrap}

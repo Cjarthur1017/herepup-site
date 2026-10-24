@@ -44,7 +44,8 @@ export function simulate(plan, claims, members, multiplier = 1) {
 
   const sorted = claims.filter((c) => covered.has(c.member)).slice().sort((a, b) => cmp(a.date, b.date) || cmp(String(a.id ?? ""), String(b.id ?? "")));
   for (const c of sorted) {
-    const amt = num(c.allowed) * multiplier;
+    // fixed: a bill set on its own (an expected birth), so the "how much care" slider doesn't scale it
+    const amt = num(c.allowed) * (c.fixed ? 1 : multiplier);
     let cat = c.category || "medical";
     const m = c.member;
     if (amt <= 0) continue;
@@ -126,10 +127,13 @@ export function premiumFor(plan, tier, deps) {
   return num((plan.premium_annual || {})[tier]);
 }
 
-export function effectiveCost(plan, tier, memberCost, countHsa, deps = null) {
-  const premium = premiumFor(plan, tier, deps);
+// mix: when someone joins part-way through the year (a baby), the coverage levels by month, each with its share of
+// the year; premiums and employer HSA money are prorated across them. Unset: one level all year.
+export function effectiveCost(plan, tier, memberCost, countHsa, deps = null, mix = null) {
   const raw = plan.hsa_employer;
-  let hsa = typeof raw === "object" && raw ? num(raw[tier]) : num(raw);
+  const hsaFor = (t) => (typeof raw === "object" && raw ? num(raw[t]) : num(raw));
+  const premium = mix ? mix.reduce((a, x) => a + x.share * premiumFor(plan, x.tier, x.deps), 0) : premiumFor(plan, tier, deps);
+  let hsa = mix ? mix.reduce((a, x) => a + x.share * hsaFor(x.tier), 0) : hsaFor(tier);
   if (!plan.hsa_eligible) hsa = 0;
   const offset = countHsa ? hsa : 0;
   return { premium, member_cost: memberCost, hsa_offset: offset, total: premium + memberCost - offset };
@@ -144,6 +148,8 @@ function* product(arrays) {
 export function enumerateConfigs(household, employers) {
   const members = household.members, ids = members.map((m) => m.id);
   const role = Object.fromEntries(members.map((m) => [m.id, m.role]));
+  // from_month: the plan month (1 to 12) someone's coverage starts, for a baby born during the year. Unset: all year.
+  const from = Object.fromEntries(members.map((m) => [m.id, Math.min(12, Math.max(1, Math.round(num(m.from_month, 1))))]));
   const empIds = employers.map((e) => e.id);
   const configs = [];
   for (const assign of product(ids.map(() => empIds))) {
@@ -159,12 +165,28 @@ export function enumerateConfigs(household, employers) {
       const parts = used.map((e, k) => {
         const covered = ids.filter((i) => a[i] === e.id);
         const others = covered.filter((i) => i !== e.subscriber).map((i) => role[i]);
-        return { employer: e.id, employer_name: e.name, plan_index: choice[k], plan: e.plans[choice[k]], covered, tier: tierFor(others), deps: others.length };
+        return { employer: e.id, employer_name: e.name, plan_index: choice[k], plan: e.plans[choice[k]], covered, tier: tierFor(others), deps: others.length,
+          mix: monthMix(covered, e.subscriber, role, from) };
       });
       configs.push({ assignment: a, parts });
     }
   }
   return configs;
+}
+
+// The coverage level month by month when someone on the plan starts after month 1: runs of months at one level,
+// each { tier, deps, from, to, share }. null when everyone is covered all year.
+export function monthMix(covered, subscriber, role, from) {
+  if (!covered.some((i) => from[i] > 1)) return null;
+  const runs = [];
+  for (let mo = 1; mo <= 12; mo++) {
+    const others = covered.filter((i) => i !== subscriber && from[i] <= mo).map((i) => role[i]);
+    const tier = tierFor(others), deps = others.length, last = runs[runs.length - 1];
+    if (last && last.tier === tier && last.deps === deps) last.to = mo;
+    else runs.push({ tier, deps, from: mo, to: mo });
+  }
+  for (const r of runs) r.share = (r.to - r.from + 1) / 12;
+  return runs.length > 1 ? runs : null;
 }
 
 export function labelConfig(cfg) {
@@ -187,9 +209,10 @@ export function analyze(household, employers, claims, multiplier = 1, countHsa =
     let total = 0, premium = 0, hsa = 0, mcost = 0;
     const detail = [];
     for (const p of cfg.parts) {
-      const eff = effectiveCost(p.plan, p.tier, memberCostOf(p.plan, claims, p.covered, multiplier), countHsa, p.deps);
+      const eff = effectiveCost(p.plan, p.tier, memberCostOf(p.plan, claims, p.covered, multiplier), countHsa, p.deps, p.mix);
       total += eff.total; premium += eff.premium; hsa += eff.hsa_offset; mcost += eff.member_cost;
       detail.push({ employer: p.employer_name, plan: p.plan.name || "plan", tier: p.tier, deps: p.deps, by_count: !!p.plan.premium_by_count, covered: p.covered,
+        ...(p.mix ? { mix: p.mix.map(({ tier, deps, from, to }) => ({ tier, deps, from, to })) } : {}),
         premium: r2(eff.premium), member_cost: r2(eff.member_cost), hsa_offset: r2(eff.hsa_offset), total: r2(eff.total) });
     }
     results.push({ label: labelConfig(cfg), kind: cfg.parts.length === 1 ? "all" : "split", total: r2(total), premium: r2(premium),
